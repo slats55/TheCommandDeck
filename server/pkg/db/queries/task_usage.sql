@@ -67,3 +67,77 @@ SELECT
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id = $1;
+
+-- name: ListDashboardUsageDaily :many
+-- Daily per-(date, model) token aggregates for the workspace, optionally
+-- scoped to a single project via sqlc.narg('project_id'). Bucketed by
+-- tu.created_at (token-production time) to match GetWorkspaceUsageByDay,
+-- so a task that queues one day and finishes the next is attributed to
+-- the day the tokens actually landed. Powers the workspace dashboard's
+-- daily cost chart.
+SELECT
+    DATE(tu.created_at) AS date,
+    tu.model,
+    SUM(tu.input_tokens)::bigint AS input_tokens,
+    SUM(tu.output_tokens)::bigint AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND tu.created_at >= DATE_TRUNC('day', @since::timestamptz)
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+GROUP BY DATE(tu.created_at), tu.model
+ORDER BY DATE(tu.created_at) DESC, tu.model;
+
+-- name: ListDashboardUsageByAgent :many
+-- Per-(agent, model) token aggregates for the workspace, optionally scoped
+-- to a single project. Model dimension is preserved so the client can
+-- compute cost from its per-model pricing table; the client folds rows by
+-- agent for the "by agent" list on the dashboard.
+SELECT
+    atq.agent_id,
+    tu.model,
+    SUM(tu.input_tokens)::bigint AS input_tokens,
+    SUM(tu.output_tokens)::bigint AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint AS cache_write_tokens,
+    COUNT(DISTINCT tu.task_id)::int AS task_count
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND tu.created_at >= DATE_TRUNC('day', @since::timestamptz)
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+GROUP BY atq.agent_id, tu.model
+ORDER BY atq.agent_id, tu.model;
+
+-- name: ListDashboardAgentRunTime :many
+-- Per-agent total task run time and task count for the workspace, optionally
+-- scoped to a single project. Counts only terminal runs (completed or failed)
+-- with both started_at and completed_at populated — queued/running tasks have
+-- no finite duration. Anchored on completed_at so the window matches the
+-- token cost window (which is anchored on tu.created_at, ~= completion time).
+SELECT
+    atq.agent_id,
+    COALESCE(
+        SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)))::bigint,
+        0
+    )::bigint AS total_seconds,
+    COUNT(*)::int AS task_count,
+    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.started_at IS NOT NULL
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= DATE_TRUNC('day', @since::timestamptz)
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+GROUP BY atq.agent_id
+ORDER BY total_seconds DESC;

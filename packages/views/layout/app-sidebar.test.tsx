@@ -90,6 +90,7 @@ vi.mock("@multica/core/paths", () => ({
     projects: () => "/acme/projects",
     autopilots: () => "/acme/autopilots",
     agents: () => "/acme/agents",
+    dashboard: () => "/acme/dashboard",
     runtimes: () => "/acme/runtimes",
     skills: () => "/acme/skills",
     settings: () => "/acme/settings",
