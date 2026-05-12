@@ -275,6 +275,8 @@ func init() {
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member or agent; fuzzy match)")
 	issueUpdateCmd.Flags().String("assignee-id", "", "New assignee UUID (mutually exclusive with --assignee)")
+	issueUpdateCmd.Flags().String("captain", "", "Set the issue captain by agent name (fuzzy match). Pass --captain none to remove the captain.")
+	issueUpdateCmd.Flags().String("captain-id", "", "Set the issue captain by agent UUID (mutually exclusive with --captain).")
 	issueUpdateCmd.Flags().String("project", "", "Project ID")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (RFC3339 format)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
@@ -698,6 +700,36 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		if hasAssignee {
 			body["assignee_type"] = aType
 			body["assignee_id"] = aID
+		}
+	}
+	if cmd.Flags().Changed("captain") || cmd.Flags().Changed("captain-id") {
+		nameSet := cmd.Flags().Changed("captain")
+		idSet := cmd.Flags().Changed("captain-id")
+		if nameSet && idSet {
+			return fmt.Errorf("--captain and --captain-id are mutually exclusive")
+		}
+		if idSet {
+			idVal, _ := cmd.Flags().GetString("captain-id")
+			if idVal == "" || strings.EqualFold(idVal, "none") {
+				body["captain_type"] = nil
+				body["captain_id"] = nil
+			} else {
+				body["captain_type"] = "agent"
+				body["captain_id"] = idVal
+			}
+		} else {
+			nameVal, _ := cmd.Flags().GetString("captain")
+			if nameVal == "" || strings.EqualFold(nameVal, "none") {
+				body["captain_type"] = nil
+				body["captain_id"] = nil
+			} else {
+				agentID, err := resolveAgent(ctx, client, nameVal)
+				if err != nil {
+					return fmt.Errorf("resolve captain: %w", err)
+				}
+				body["captain_type"] = "agent"
+				body["captain_id"] = agentID
+			}
 		}
 	}
 	if cmd.Flags().Changed("parent") {
