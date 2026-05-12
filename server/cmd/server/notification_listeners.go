@@ -81,6 +81,7 @@ var notifTypeToGroup = map[string]string{
 	"issue_assigned":  "assignments",
 	"unassigned":      "assignments",
 	"assignee_changed": "assignments",
+	"captain_changed":  "assignments",
 	"status_changed":  "status_changes",
 	"new_comment":     "comments",
 	"mentioned":       "comments",
@@ -565,10 +566,13 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			return
 		}
 		assigneeChanged, _ := payload["assignee_changed"].(bool)
+		captainChanged, _ := payload["captain_changed"].(bool)
 		statusChanged, _ := payload["status_changed"].(bool)
 		descriptionChanged, _ := payload["description_changed"].(bool)
 		prevAssigneeType, _ := payload["prev_assignee_type"].(*string)
 		prevAssigneeID, _ := payload["prev_assignee_id"].(*string)
+		prevCaptainType, _ := payload["prev_captain_type"].(*string)
+		prevCaptainID, _ := payload["prev_captain_id"].(*string)
 		prevDescription, _ := payload["prev_description"].(*string)
 
 		if assigneeChanged {
@@ -627,16 +631,39 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				assigneeDetails)
 		}
 
-		if statusChanged {
-			prevStatus, _ := payload["prev_status"].(string)
-			statusDetails, _ := json.Marshal(map[string]string{
-				"from": prevStatus,
-				"to":   issue.Status,
-			})
+		if captainChanged {
+			// Captain is always an agent — skip notifyDirect (agents have no
+			// inbox) and just notify subscribers, excluding the actor and
+			// both the old + new captain agent IDs.
+			detailsMap := map[string]any{}
+			if prevCaptainType != nil {
+				detailsMap["prev_captain_type"] = *prevCaptainType
+			}
+			if prevCaptainID != nil {
+				detailsMap["prev_captain_id"] = *prevCaptainID
+			}
+			if issue.CaptainType != nil {
+				detailsMap["new_captain_type"] = *issue.CaptainType
+			}
+			if issue.CaptainID != nil {
+				detailsMap["new_captain_id"] = *issue.CaptainID
+			}
+			captainDetails, _ := json.Marshal(detailsMap)
+
+			exclude := map[string]bool{}
+			if prevCaptainID != nil {
+				exclude[*prevCaptainID] = true
+			}
+			if issue.CaptainID != nil {
+				exclude[*issue.CaptainID] = true
+			}
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
-				nil, "status_changed", "info",
+				exclude, "captain_changed", "info",
 				issue.Title, "",
-				statusDetails)
+				captainDetails)
+		}
+
+		if statusChanged {
 
 			// When the issue progresses past the failure (in_review / done /
 			// cancelled), retire any stale task_failed inbox rows so the

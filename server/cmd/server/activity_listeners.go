@@ -61,6 +61,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 		statusChanged, _ := payload["status_changed"].(bool)
 		priorityChanged, _ := payload["priority_changed"].(bool)
 		assigneeChanged, _ := payload["assignee_changed"].(bool)
+		captainChanged, _ := payload["captain_changed"].(bool)
 		descriptionChanged, _ := payload["description_changed"].(bool)
 
 		if statusChanged {
@@ -136,6 +137,41 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 			})
 			if err != nil {
 				slog.Error("activity: failed to record assignee change",
+					"issue_id", issue.ID, "error", err)
+			} else {
+				publishActivityEvent(bus, e, activity)
+			}
+		}
+
+		if captainChanged {
+			prevCaptainType, _ := payload["prev_captain_type"].(*string)
+			prevCaptainID, _ := payload["prev_captain_id"].(*string)
+
+			detailsMap := map[string]string{}
+			if prevCaptainType != nil {
+				detailsMap["from_type"] = *prevCaptainType
+			}
+			if prevCaptainID != nil {
+				detailsMap["from_id"] = *prevCaptainID
+			}
+			if issue.CaptainType != nil {
+				detailsMap["to_type"] = *issue.CaptainType
+			}
+			if issue.CaptainID != nil {
+				detailsMap["to_id"] = *issue.CaptainID
+			}
+
+			details, _ := json.Marshal(detailsMap)
+			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+				WorkspaceID: parseUUID(issue.WorkspaceID),
+				IssueID:     parseUUID(issue.ID),
+				ActorType:   util.StrToText(e.ActorType),
+				ActorID:     optionalUUID(e.ActorID),
+				Action:      "captain_changed",
+				Details:     details,
+			})
+			if err != nil {
+				slog.Error("activity: failed to record captain change",
 					"issue_id", issue.ID, "error", err)
 			} else {
 				publishActivityEvent(bus, e, activity)
