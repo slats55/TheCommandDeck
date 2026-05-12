@@ -17,9 +17,12 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 import { ReactNodeViewRenderer, NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
-import { FileText, Loader2, Download } from "lucide-react";
+import { FileText, Loader2, Download, Eye } from "lucide-react";
+import { useState } from "react";
 import { useT } from "../../i18n";
 import { useAttachmentDownloadResolver } from "../attachment-download-context";
+import { FilePreviewModal } from "../../file-preview/file-preview-modal";
+import { getRendererKey } from "../../file-preview/get-renderer";
 
 
 // ---------------------------------------------------------------------------
@@ -36,10 +39,14 @@ function FileCardView({ node }: NodeViewProps) {
   const filename = (node.attrs.filename as string) || "";
   const uploading = node.attrs.uploading as boolean;
   const { openByUrl } = useAttachmentDownloadResolver();
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const openFile = () => {
     openByUrl(href);
   };
+
+  const previewable =
+    !uploading && href !== "" && getRendererKey(filename) !== "unsupported";
 
   return (
     <NodeViewWrapper as="div" className="file-card-node" data-type="fileCard">
@@ -56,6 +63,20 @@ function FileCardView({ node }: NodeViewProps) {
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm">{uploading ? t(($) => $.file_card.uploading, { filename }) : filename}</p>
         </div>
+        {previewable && (
+          <button
+            type="button"
+            className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            title={t(($) => $.file_card.preview)}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setPreviewOpen(true);
+            }}
+          >
+            <Eye className="size-3.5" />
+          </button>
+        )}
         {!uploading && href && (
           <button
             type="button"
@@ -70,6 +91,14 @@ function FileCardView({ node }: NodeViewProps) {
           </button>
         )}
       </div>
+      {previewOpen && (
+        <FilePreviewModal
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          url={href}
+          filename={filename}
+        />
+      )}
     </NodeViewWrapper>
   );
 }
