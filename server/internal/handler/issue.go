@@ -1087,6 +1087,8 @@ type CreateIssueRequest struct {
 	Priority           string   `json:"priority"`
 	AssigneeType       *string  `json:"assignee_type"`
 	AssigneeID         *string  `json:"assignee_id"`
+	CaptainType        *string  `json:"captain_type"`
+	CaptainID          *string  `json:"captain_id"`
 	ParentIssueID      *string  `json:"parent_issue_id"`
 	ProjectID          *string  `json:"project_id"`
 	DueDate            *string  `json:"due_date"`
@@ -1147,6 +1149,23 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID); status != 0 {
+		writeError(w, status, msg)
+		return
+	}
+
+	var captainType pgtype.Text
+	var captainID pgtype.UUID
+	if req.CaptainType != nil {
+		captainType = pgtype.Text{String: *req.CaptainType, Valid: true}
+	}
+	if req.CaptainID != nil {
+		id, ok := parseUUIDOrBadRequest(w, *req.CaptainID, "captain_id")
+		if !ok {
+			return
+		}
+		captainID = id
+	}
+	if status, msg := h.validateCaptainPair(r.Context(), r, workspaceID, captainType, captainID); status != 0 {
 		writeError(w, status, msg)
 		return
 	}
@@ -1260,6 +1279,8 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			ProjectID:     projectID,
 			OriginType:    originType,
 			OriginID:      originID,
+			CaptainType:   captainType,
+			CaptainID:     captainID,
 		})
 	} else {
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
@@ -1277,6 +1298,8 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			DueDate:       dueDate,
 			Number:        issueNumber,
 			ProjectID:     projectID,
+			CaptainType:   captainType,
+			CaptainID:     captainID,
 		})
 	}
 	if err != nil {
@@ -1370,6 +1393,8 @@ type UpdateIssueRequest struct {
 	Priority           *string  `json:"priority"`
 	AssigneeType       *string  `json:"assignee_type"`
 	AssigneeID         *string  `json:"assignee_id"`
+	CaptainType        *string  `json:"captain_type"`
+	CaptainID          *string  `json:"captain_id"`
 	Position           *float64 `json:"position"`
 	DueDate            *string  `json:"due_date"`
 	ParentIssueID      *string  `json:"parent_issue_id"`
@@ -1407,6 +1432,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		ID:            prevIssue.ID,
 		AssigneeType:  prevIssue.AssigneeType,
 		AssigneeID:    prevIssue.AssigneeID,
+		CaptainType:   prevIssue.CaptainType,
+		CaptainID:     prevIssue.CaptainID,
 		DueDate:       prevIssue.DueDate,
 		ParentIssueID: prevIssue.ParentIssueID,
 		ProjectID:     prevIssue.ProjectID,
@@ -1445,6 +1472,24 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.AssigneeID = id
 		} else {
 			params.AssigneeID = pgtype.UUID{Valid: false} // explicit null = unassign
+		}
+	}
+	if _, ok := rawFields["captain_type"]; ok {
+		if req.CaptainType != nil {
+			params.CaptainType = pgtype.Text{String: *req.CaptainType, Valid: true}
+		} else {
+			params.CaptainType = pgtype.Text{Valid: false} // explicit null = remove captain
+		}
+	}
+	if _, ok := rawFields["captain_id"]; ok {
+		if req.CaptainID != nil {
+			id, ok := parseUUIDOrBadRequest(w, *req.CaptainID, "captain_id")
+			if !ok {
+				return
+			}
+			params.CaptainID = id
+		} else {
+			params.CaptainID = pgtype.UUID{Valid: false} // explicit null = remove captain
 		}
 	}
 	if _, ok := rawFields["due_date"]; ok {
@@ -1521,6 +1566,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Same for captain pair.
+	_, touchedCaptainType := rawFields["captain_type"]
+	_, touchedCaptainID := rawFields["captain_id"]
+	if touchedCaptainType || touchedCaptainID {
+		if status, msg := h.validateCaptainPair(r.Context(), r, workspaceID, params.CaptainType, params.CaptainID); status != 0 {
+			writeError(w, status, msg)
+			return
+		}
+	}
 
 	issue, err := h.Queries.UpdateIssue(r.Context(), params)
 	if err != nil {
@@ -1535,6 +1589,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	assigneeChanged := (req.AssigneeType != nil || req.AssigneeID != nil) &&
 		(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
+	captainChanged := (touchedCaptainType || touchedCaptainID) &&
+		(prevIssue.CaptainType.String != issue.CaptainType.String || uuidToString(prevIssue.CaptainID) != uuidToString(issue.CaptainID))
 	statusChanged := req.Status != nil && prevIssue.Status != issue.Status
 	priorityChanged := req.Priority != nil && prevIssue.Priority != issue.Priority
 	descriptionChanged := req.Description != nil && textToPtr(prevIssue.Description) != resp.Description
@@ -1549,6 +1605,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
 		"issue":               resp,
 		"assignee_changed":    assigneeChanged,
+		"captain_changed":     captainChanged,
 		"status_changed":      statusChanged,
 		"priority_changed":    priorityChanged,
 		"due_date_changed":    dueDateChanged,
@@ -1557,6 +1614,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"prev_title":          prevIssue.Title,
 		"prev_assignee_type":  textToPtr(prevIssue.AssigneeType),
 		"prev_assignee_id":    uuidToPtr(prevIssue.AssigneeID),
+		"prev_captain_type":   textToPtr(prevIssue.CaptainType),
+		"prev_captain_id":     uuidToPtr(prevIssue.CaptainID),
 		"prev_status":         prevIssue.Status,
 		"prev_priority":       prevIssue.Priority,
 		"prev_due_date":       prevDueDate,
@@ -1592,6 +1651,42 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// validateCaptainPair verifies the (captain_type, captain_id) pair refers
+// to a usable agent in the workspace. v1 only accepts captain_type='agent';
+// the agent must exist, not be archived, and be accessible to the caller via
+// canAccessPrivateAgent (mirrors validateAssigneePair). Returning the issue
+// to "no captain" via (nil, nil) is always valid.
+func (h *Handler) validateCaptainPair(ctx context.Context, r *http.Request, workspaceID string, captainType pgtype.Text, captainID pgtype.UUID) (int, string) {
+	if !captainType.Valid && !captainID.Valid {
+		return 0, ""
+	}
+	if captainType.Valid != captainID.Valid {
+		return http.StatusBadRequest, "captain_type and captain_id must be provided together"
+	}
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return http.StatusBadRequest, "invalid workspace_id"
+	}
+	if captainType.String != "agent" {
+		return http.StatusBadRequest, "captain_type must be 'agent'"
+	}
+	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID:          captainID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		return http.StatusBadRequest, "captain_id does not refer to an agent of this workspace"
+	}
+	if agent.ArchivedAt.Valid {
+		return http.StatusBadRequest, "cannot set archived agent as captain"
+	}
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	if !h.canAccessPrivateAgent(ctx, agent, actorType, actorID, workspaceID) {
+		return http.StatusForbidden, "cannot set private agent as captain"
+	}
+	return 0, ""
 }
 
 // validateAssigneePair verifies the (assignee_type, assignee_id) pair refers
