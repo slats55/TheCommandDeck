@@ -8,6 +8,9 @@ DROP FUNCTION IF EXISTS enqueue_task_usage_dashboard_dirty_for_issue_project();
 DROP TRIGGER IF EXISTS trg_tu_dirty_dashboard ON task_usage;
 DROP FUNCTION IF EXISTS enqueue_task_usage_dashboard_dirty_for_tu();
 
+DROP TRIGGER IF EXISTS trg_issue_delete_dirty_dashboard ON issue;
+DROP FUNCTION IF EXISTS enqueue_task_usage_dashboard_dirty_for_issue_delete();
+
 DROP TRIGGER IF EXISTS trg_atq_dirty_dashboard ON agent_task_queue;
 DROP FUNCTION IF EXISTS enqueue_task_usage_dashboard_dirty_for_atq();
 

@@ -98,12 +98,110 @@ CREATE TABLE task_usage_dashboard_dirty (
 CREATE INDEX idx_task_usage_dashboard_dirty_enqueued_at
     ON task_usage_dashboard_dirty (enqueued_at);
 
--- Trigger 1: agent_task_queue BEFORE DELETE.
--- Cascade-deletes from issue/agent take task_usage rows with them; this
--- trigger captures their buckets while the join is still intact.
--- workspace_id resolves via `agent` (NOT `issue`) so an issue-driven
--- cascade still finds it after the issue row vanishes.
+-- Trigger 1: agent_task_queue BEFORE UPDATE OF issue_id OR DELETE.
+--
+-- Two cases:
+--
+--   * UPDATE OF issue_id — currently only `LinkTaskToIssue` (quick-create
+--     tasks attaching to the issue the agent just produced) writes here,
+--     moving the task from `issue_id IS NULL` to a real issue. If usage
+--     already rolled up under the no-project bucket, we have to enqueue
+--     both OLD (NULL project) AND NEW (the new issue's project) so the
+--     next tick re-attributes the tokens.
+--
+--   * DELETE — direct atq deletions land here with the issue row still
+--     alive, so `LEFT JOIN issue` resolves the project correctly.
+--     Cascade DELETE driven from `DELETE FROM issue` is handled by
+--     `enqueue_task_usage_dashboard_dirty_for_issue_delete` below (which
+--     fires *before* the cascade, while `issue.project_id` is still
+--     readable); this trigger may also fire during that cascade, but the
+--     join returns no row → workspace_id is missing, so the JOIN on
+--     `agent` keeps the enqueue safe and the resulting NULL-project key
+--     no-ops on recompute (deleted_empty path).
 CREATE OR REPLACE FUNCTION enqueue_task_usage_dashboard_dirty_for_atq()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF TG_OP = 'UPDATE' THEN
+        IF OLD.issue_id IS DISTINCT FROM NEW.issue_id THEN
+            -- OLD side: project_id of OLD.issue_id (NULL when OLD.issue_id IS NULL,
+            -- e.g. the quick-create starting state).
+            INSERT INTO task_usage_dashboard_dirty (
+                bucket_date, workspace_id, agent_id, project_id, model
+            )
+            SELECT DISTINCT
+                DATE(tu.created_at),
+                a.workspace_id,
+                OLD.agent_id,
+                i_old.project_id,
+                tu.model
+              FROM task_usage tu
+              JOIN agent a ON a.id = OLD.agent_id
+              LEFT JOIN issue i_old ON i_old.id = OLD.issue_id
+             WHERE tu.task_id = OLD.id
+            ON CONFLICT ON CONSTRAINT uq_task_usage_dashboard_dirty_key DO UPDATE
+                SET enqueued_at = GREATEST(task_usage_dashboard_dirty.enqueued_at, EXCLUDED.enqueued_at);
+
+            -- NEW side: project_id of NEW.issue_id.
+            INSERT INTO task_usage_dashboard_dirty (
+                bucket_date, workspace_id, agent_id, project_id, model
+            )
+            SELECT DISTINCT
+                DATE(tu.created_at),
+                a.workspace_id,
+                NEW.agent_id,
+                i_new.project_id,
+                tu.model
+              FROM task_usage tu
+              JOIN agent a ON a.id = NEW.agent_id
+              LEFT JOIN issue i_new ON i_new.id = NEW.issue_id
+             WHERE tu.task_id = NEW.id
+            ON CONFLICT ON CONSTRAINT uq_task_usage_dashboard_dirty_key DO UPDATE
+                SET enqueued_at = GREATEST(task_usage_dashboard_dirty.enqueued_at, EXCLUDED.enqueued_at);
+        END IF;
+        RETURN NEW;
+    ELSIF TG_OP = 'DELETE' THEN
+        INSERT INTO task_usage_dashboard_dirty (
+            bucket_date, workspace_id, agent_id, project_id, model
+        )
+        SELECT DISTINCT
+            DATE(tu.created_at),
+            a.workspace_id,
+            OLD.agent_id,
+            i.project_id,
+            tu.model
+          FROM task_usage tu
+          JOIN agent a ON a.id = OLD.agent_id
+          LEFT JOIN issue i ON i.id = OLD.issue_id
+         WHERE tu.task_id = OLD.id
+        ON CONFLICT ON CONSTRAINT uq_task_usage_dashboard_dirty_key DO UPDATE
+            SET enqueued_at = GREATEST(task_usage_dashboard_dirty.enqueued_at, EXCLUDED.enqueued_at);
+        RETURN OLD;
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER trg_atq_dirty_dashboard
+BEFORE UPDATE OF issue_id OR DELETE ON agent_task_queue
+FOR EACH ROW EXECUTE FUNCTION enqueue_task_usage_dashboard_dirty_for_atq();
+
+-- Trigger 1b: issue BEFORE DELETE.
+--
+-- `DELETE FROM issue` cascades to `agent_task_queue` and onward to
+-- `task_usage`. By the time the atq BEFORE DELETE trigger runs, the
+-- issue row is gone and `LEFT JOIN issue` returns NULL for project_id,
+-- so the atq trigger would enqueue a NULL-project key — the rollup row
+-- under the original project would never get cleared and would keep
+-- billing the workspace for tokens that no longer have a source.
+--
+-- This trigger fires BEFORE the cascade, while `OLD.project_id` is still
+-- readable, and enqueues one dirty row per (date, agent, model) the
+-- issue's tasks contributed to. The next rollup tick recomputes the
+-- bucket, finds no source rows under the original project, and drops it
+-- (deleted_empty path).
+CREATE OR REPLACE FUNCTION enqueue_task_usage_dashboard_dirty_for_issue_delete()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
@@ -113,23 +211,22 @@ BEGIN
     )
     SELECT DISTINCT
         DATE(tu.created_at),
-        a.workspace_id,
-        OLD.agent_id,
-        i.project_id,
+        OLD.workspace_id,
+        atq.agent_id,
+        OLD.project_id,
         tu.model
-      FROM task_usage tu
-      JOIN agent a ON a.id = OLD.agent_id
-      LEFT JOIN issue i ON i.id = OLD.issue_id
-     WHERE tu.task_id = OLD.id
+      FROM agent_task_queue atq
+      JOIN task_usage tu ON tu.task_id = atq.id
+     WHERE atq.issue_id = OLD.id
     ON CONFLICT ON CONSTRAINT uq_task_usage_dashboard_dirty_key DO UPDATE
         SET enqueued_at = GREATEST(task_usage_dashboard_dirty.enqueued_at, EXCLUDED.enqueued_at);
     RETURN OLD;
 END;
 $$;
 
-CREATE TRIGGER trg_atq_dirty_dashboard
-BEFORE DELETE ON agent_task_queue
-FOR EACH ROW EXECUTE FUNCTION enqueue_task_usage_dashboard_dirty_for_atq();
+CREATE TRIGGER trg_issue_delete_dirty_dashboard
+BEFORE DELETE ON issue
+FOR EACH ROW EXECUTE FUNCTION enqueue_task_usage_dashboard_dirty_for_issue_delete();
 
 -- Trigger 2: task_usage BEFORE DELETE.
 -- Rare in practice (no direct DELETE call sites today) but ensures the
