@@ -105,6 +105,15 @@ type Daemon struct {
 	// goroutine can race against t.TempDir cleanup, leaving a partially
 	// deleted bare clone and an unrelated `not empty` cleanup failure.
 	bgSyncs sync.WaitGroup
+
+	cmdexecHandler *cmdexec.WebSocketHandler // receives command_run:execute from server WS
+}
+
+// SetCommandRunHandler installs the cmdexec handler once the WS connection is live.
+// The writes channel is the daemon's WS write queue — sending on it is the same
+// as writing to the WebSocket connection.
+func (d *Daemon) SetCommandRunHandler(writes chan<- []byte) {
+	d.cmdexecHandler = cmdexec.NewWebSocketHandler(d.cfg.WorkspacesRoot, writes, d.logger)
 }
 
 // New creates a new Daemon instance.
