@@ -6,7 +6,7 @@ chore/commanddeck-build-gate-001
 
 ## Verified Commit
 
-74d8612c10a9c8c83abe119b8b45a759a5044d52
+d9fe4621d30c9337fcc8878fb7521873fd89f33e
 
 ## Environment
 
@@ -33,31 +33,57 @@ Toolchain path: /home/mtval/go/bin/sqlc
 ## Commands Run
 
 ```bash
+git fetch origin
+git checkout chore/commanddeck-build-gate-001
+git pull origin chore/commanddeck-build-gate-001  # synced to d9fe4621
 cd server/
 sqlc generate
 go build ./...
 git status
-git diff --stat
+git diff d9fe4621 74d8612c -- server/internal/handler/commandrunner.go
 ```
 
-## Integration Branch Verification
-
-N/A — integration branch (origin/chore/commanddeck-discovery-001) not tested in this pass. Issue body directs verification at build-gate and Slice 3 branches.
-
-## Build-Gate Branch Verification
+## Build-Gate Branch Verification (d9fe4621)
 
 ### go build ./...
 
 **FAIL**
 
 ```
-internal/handler/commandrunner.go:56:19: cannot use (*int32)(&run.ExitCode.Int32) (value of type *int32) as *int value in assignment
-internal/handler/commandrunner.go:65:21: cannot use (*int32)(&run.DurationMs.Int32) (value of type *int32) as *int value in assignment
+cmd/server/router.go:474:27: h.HandleCommandRunnerTemplates undefined (type *handler.Handler has no field or method HandleCommandRunnerTemplates, but does have unexported method handleCommandRunnerTemplates)
+cmd/server/router.go:475:22: h.HandleCommandRunnerRun undefined
+cmd/server/router.go:476:29: h.HandleCommandRunnerGet undefined
+cmd/server/router.go:477:22: h.HandleCommandRunnerList undefined
 ```
+
+**Analysis:**
+
+Mr.R9's int32-to-int conversion fix (d9fe4621) is correctly applied — the intermediate variable pattern on lines 57 and 67 of commandrunner.go is correct:
+
+```go
+// Before (broken):
+resp.ExitCode = (*int32)(&run.ExitCode.Int32)
+
+// After (correct):
+code := int(run.ExitCode.Int32)
+resp.ExitCode = &code
+```
+
+The prior round's fixes (74d8612c: daemon.go channel direction, pgtype.Int4.Int → .Int32) are also present. All pgtype and channel issues are resolved.
+
+The remaining build failure is a **different, pre-existing issue**: `router.go` calls exported handler methods (`h.HandleCommandRunnerTemplates`, etc.) but `commandrunner.go` defines them as unexported (`handleCommandRunnerTemplates`, etc.). This router bug was introduced when commandrunner.go was first added — it was masked by earlier build failures and only became visible after the pgtype/channel fixes were resolved.
 
 ### sqlc generate
 
 **PASS**
+
+After running sqlc generate, CommandRun and CommandTemplate types are added to models.go and the generated SQL files are complete.
+
+**Critical finding: generated files not committed.** The sqlc-generated files (command_run.sql.go, command_template.sql.go, updated models.go with CommandRun/CommandTemplate types) were never committed in any build-gate branch commit. Mr.R9 ran sqlc generate locally but did not commit the output. These files must be committed alongside the source fixes.
+
+## Integration Branch Verification
+
+Not tested — integration base (origin/chore/commanddeck-discovery-001, b07374be) is known to fail `go build ./...` with the daemon.go channel issue. Build-gate branch builds on top of it and is the proper test target.
 
 ## Slice 3 Branch Verification
 
@@ -76,76 +102,97 @@ internal/handler/commandrunner.go:361:26: unknown field Int in struct literal of
 internal/handler/commandrunner.go:377:28: unknown field Int in struct literal of type pgtype.Int4
 ```
 
+Slice 3 retains ALL original errors. None of the build-gate fixes (pgtype.Int → .Int32, intermediate variable pattern, daemon.go channel direction) are present in Slice 3. Cannot be merged until fixes are applied.
+
 ### sqlc generate
 
 **PASS**
 
-## Diff Scope
+## Diff Scope (build-gate, d9fe4621 vs integration base b07374be)
 
-Both branches show identical untracked sqlc-generated files after `sqlc generate`:
-- 32 modified generated .go files
-- 2 new untracked files: command_run.sql.go, command_template.sql.go
+| File | Change |
+|------|--------|
+| server/internal/daemon/daemon.go | 1 line: `chan<- []byte` → `chan []byte` (channel direction fix) |
+| server/internal/handler/commandrunner.go | 10 lines: pgtype.Int4.Int → .Int32 + int32→int intermediate variable pattern |
+| docs/commanddeck/handoffs/COMMANDDECK-BUILD-GATE-001-MR-R9-HANDOFF.md | Builder handoff |
+| docs/commanddeck/handoffs/COMMANDDECK-BUILD-GATE-001-MR-R7-VERIFY.md | Prior verification report |
 
-These are sqlc artifacts — not committed, not part of the code fix.
-
-Commit 74d8612c (build-gate) changed:
-- daemon.go: channel direction `chan<- []byte` → `chan []byte`
-- commandrunner.go: 4× pgtype.Int4 field `.Int` → `.Int32`
+**Scope discipline: PASS** — No new features, no command templates, no preview registry, no arbitrary shell, no UI changes. Only compile-only fixes and docs.
 
 ## Files Reviewed
 
-- server/internal/daemon/daemon.go
-- server/internal/handler/commandrunner.go
-- server/internal/handler/responses.go (type definitions for ExitCode, DurationMs)
+- server/internal/handler/commandrunner.go (lines 53-75: int32→int fix; lines 355-385: pgtype.Int4.Int → .Int32 fix)
+- server/internal/daemon/daemon.go (line 117: channel direction fix)
+- server/cmd/server/router.go (lines 474-477: router handler registration — contains pre-existing bug)
 
 ## Scope Discipline Review
 
-**PASS** — No new features added in build-gate branch. Only compile fixes applied to daemon.go and commandrunner.go. No command templates, no preview registry, no arbitrary shell, no UI changes.
+**PASS** — Build-gate branch changes are limited to daemon.go and commandrunner.go compile fixes. No new command templates, no preview registry, no arbitrary shell, no UI work. Handoff docs are documentation only.
 
 ## Security Review
 
-**PASS** — No security-relevant changes in build-gate branch. Channel direction fix and pgtype field name corrections are compile-only. No new attack surface.
+**PASS** — All changes are compile-only type corrections. No new attack surface. The argv-style allowlist and no-shell-execution properties are unchanged.
 
 ## Fake Evidence Review
 
-**CLEAN** — No fake build evidence. Build was actually run. Failures are genuine compile errors.
+**CLEAN** — Build was run with actual go/sqlc tools. Failures are genuine compile errors with verifiable error messages.
 
 ## Risks / Concerns
 
-**CRITICAL**: Commit 74d8612c partially fixed the compile errors but introduced a new type incompatibility.
+1. **BLOCKING — router.go unexported method bug:** `router.go` calls `h.HandleCommandRunnerTemplates` etc. (exported) but the handler has `handleCommandRunnerTemplates` etc. (unexported). This pre-existing bug was introduced when commandrunner.go was first added to the integration base and was masked by earlier build failures. It must be fixed before the build can pass.
 
-- `responses.go` defines `ExitCode *int` and `DurationMs *int`
-- Mr.R9's fix changed `pgtype.Int4.Int` → `pgtype.Int4.Int32` (correct for field name)
-- But the assignment `(*int32)(&run.ExitCode.Int32)` is invalid because `*int32` cannot be cast to `*int` in Go
+2. **BLOCKING — sqlc generated files not committed:** The build-gate branch lacks the committed output of `sqlc generate`. The `CommandRun` and `CommandTemplate` types referenced in commandrunner.go are generated by sqlc into models.go and command_run.sql.go/command_template.sql.go — these files were never committed in any build-gate commit. Without them committed, the build fails even with correct source code.
 
-The correct fix requires converting through an intermediate `int`:
-```go
-v := int(run.ExitCode.Int32)
-resp.ExitCode = &v
-```
-
-The Slice 3 branch (1ee20cd8) still has the original errors: `.Int` field and channel direction.
+3. **Slice 3 not fixed:** Slice 3 (1ee20cd8) has not received any of the build-gate fixes. It will fail `go build ./...` with the original errors regardless of whether build-gate passes.
 
 ## Required Fixes
 
-**Build-gate branch (74d8612c)**: Fix type cast in commandrunner.go lines 56 and 65:
-- Change `resp.ExitCode = (*int32)(&run.ExitCode.Int32)` to convert via `int`
-- Change `resp.DurationMs = (*int32)(&run.DurationMs.Int32)` to convert via `int`
+### Fix 1: Commit sqlc generated files (build-gate branch)
 
-**Slice 3 branch (1ee20cd8)**: Requires all fixes from build-gate branch PLUS channel direction fix in daemon.go:117. Rebase or cherry-pick build-gate fixes onto Slice 3.
+Run `sqlc generate` on the build-gate branch and commit the output:
+- `server/pkg/db/generated/command_run.sql.go` (new)
+- `server/pkg/db/generated/command_template.sql.go` (new)
+- `server/pkg/db/generated/models.go` (updated with CommandRun, CommandTemplate types)
+- All other generated files that differ from committed versions
+
+### Fix 2: Export handler methods or fix router calls (build-gate branch)
+
+Two options — pick one:
+- **Option A (export):** In commandrunner.go, rename `handleCommandRunnerTemplates` → `HandleCommandRunnerTemplates`, `handleCommandRunnerRun` → `HandleCommandRunnerRun`, `handleCommandRunnerGet` → `HandleCommandRunnerGet`, `handleCommandRunnerList` → `HandleCommandRunnerList`
+- **Option B (unexport router):** In router.go, change `h.HandleCommandRunnerTemplates` → `h.handleCommandRunnerTemplates`, etc.
+
+Recommend Option A to match the existing pattern (other handlers like HandleGitHubWebhook use exported names).
+
+### Fix 3: Apply fixes to Slice 3 (Slice 3 branch)
+
+Slice 3 needs:
+- daemon.go: channel direction `chan<- []byte` → `chan []byte`
+- commandrunner.go: pgtype.Int4.Int → .Int32 (lines 56, 65, 361, 377)
+- commandrunner.go: `(*int32)(&run.ExitCode.Int32)` → intermediate `int` variable
+- sqlc generated files committed
+
+Rebase or cherry-pick build-gate fixes onto Slice 3 after Fix 1 and Fix 2 are committed.
 
 ## Verifier Verdict
 
 **FAIL**
 
-Both branches fail `go build ./...`. The build-gate branch's partial fix (`.Int` → `.Int32`) was necessary but insufficient — it introduced a Go type incompatibility (`*int32` → `*int` cast is invalid). The Slice 3 branch retains the original `.Int` field errors AND the channel direction error.
+Mr.R9's int32-to-int conversion fix (d9fe4621) is **correctly applied** and resolves the specific issue identified in the prior verification round. The pgtype.Int4.Int → .Int32 field name fix and daemon.go channel direction fix from 74d8612c are also present.
+
+However, two new/blocking issues prevent the build from passing:
+
+1. **sqlc generated files not committed** — CommandRun and CommandTemplate types are generated but not in git. `sqlc generate` must be run and committed.
+2. **router.go handler method export mismatch** — `h.HandleCommandRunnerTemplates` (exported, router expects) vs `handleCommandRunnerTemplates` (unexported, handler has). Pre-existing bug, not part of Mr.R9's assigned scope.
+
+Slice 3 (1ee20cd8) remains completely unfixed.
 
 Neither branch is ready for merge.
 
 ## Required Follow-Up
 
-1. Mr.R9 must apply the `*int32` → `*int` conversion fix on build-gate branch
-2. After build-gate passes, Slice 3 must be rebased or have fixes cherry-picked
-3. Verification must run again with actual `go build ./...` passing on both branches
+1. Mr.R9 (or assigned builder): Run `sqlc generate` and commit all generated file changes to build-gate branch
+2. Mr.R9 (or assigned builder): Fix router/handler method export mismatch on build-gate branch
+3. Mr.Commander: Assign Slice 3 fix after build-gate passes
+4. Mr.R7: Re-verify after Fix 1 and Fix 2 are committed
 
-Do not merge until both branches pass `go build ./...`.
+Do not merge until build-gate passes `go build ./...` cleanly.
