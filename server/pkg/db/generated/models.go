@@ -185,6 +185,27 @@ type ChatSession struct {
 	RuntimeID   pgtype.UUID        `json:"runtime_id"`
 }
 
+type CommandLedger struct {
+	ID               pgtype.UUID        `json:"id"`
+	CommandRunID     pgtype.UUID        `json:"command_run_id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	TemplateID       pgtype.UUID        `json:"template_id"`
+	RuntimeID        pgtype.UUID        `json:"runtime_id"`
+	Command          string             `json:"command"`
+	Arguments        []string           `json:"arguments"`
+	WorkingDirectory string             `json:"working_directory"`
+	InitiatorType    string             `json:"initiator_type"`
+	InitiatorID      pgtype.UUID        `json:"initiator_id"`
+	Status           string             `json:"status"`
+	ExitCode         pgtype.Int4        `json:"exit_code"`
+	StdoutHash       pgtype.Text        `json:"stdout_hash"`
+	StderrHash       pgtype.Text        `json:"stderr_hash"`
+	StartedAt        pgtype.Timestamptz `json:"started_at"`
+	FinishedAt       pgtype.Timestamptz `json:"finished_at"`
+	DurationMs       pgtype.Int4        `json:"duration_ms"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
 type CommandRun struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`

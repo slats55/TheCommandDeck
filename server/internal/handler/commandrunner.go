@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -398,6 +400,36 @@ func (h *Handler) HandleDaemonCommandRunWS(ctx context.Context, identity daemonw
 		return err
 	}
 
+	// Fetch the full command_run row to populate the ledger entry.
+	runRow, err := h.Queries.GetCommandRun(ctx, runID)
+	if err != nil {
+		slog.Warn("GetCommandRun failed during ledger write", "run_id", result.CommandRunID, "error", err)
+	} else {
+		stdoutHash := hashString(result.Stdout)
+		stderrHash := hashString(result.Stderr)
+		_, err = h.Queries.CreateCommandLedgerEntry(ctx, db.CreateCommandLedgerEntryParams{
+			CommandRunID:    runRow.ID,
+			WorkspaceID:     runRow.WorkspaceID,
+			TemplateID:      runRow.TemplateID,
+			RuntimeID:       runRow.RuntimeID,
+			Command:         runRow.Command,
+			Arguments:       runRow.Arguments,
+			WorkingDirectory: runRow.WorkingDirectory,
+			InitiatorType:  runRow.InitiatorType,
+			InitiatorID:    runRow.InitiatorID,
+			Status:         result.Status,
+			ExitCode:       exitCode,
+			StdoutHash:     toText(stdoutHash),
+			StderrHash:     toText(stderrHash),
+			StartedAt:       startedAt,
+			FinishedAt:      finishedAt,
+			DurationMs:     durationMs,
+		})
+		if err != nil {
+			slog.Warn("CreateCommandLedgerEntry failed (best-effort, non-blocking)", "run_id", result.CommandRunID, "error", err)
+		}
+	}
+
 	slog.Info("command run completed", "run_id", result.CommandRunID, "status", result.Status)
 	return nil
 }
@@ -405,6 +437,15 @@ func (h *Handler) HandleDaemonCommandRunWS(ctx context.Context, identity daemonw
 // toText converts a string to a nullable pgtype.Text.
 func toText(s string) pgtype.Text {
 	return pgtype.Text{String: s, Valid: s != ""}
+}
+
+// hashString returns the SHA256 hex digest of a string.
+func hashString(s string) string {
+	if s == "" {
+		return ""
+	}
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
 }
 
 // isPrefixedBy returns true if s starts with prefix.
