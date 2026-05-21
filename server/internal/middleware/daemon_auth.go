@@ -69,7 +69,10 @@ func WithDaemonContext(ctx context.Context, workspaceID, daemonID string) contex
 //     and a daemon converges on one DB round-trip per AuthCacheTTL window.
 //
 // Cache misses fall back to the original DB-backed behavior.
-func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.DaemonTokenCache) func(http.Handler) http.Handler {
+//
+// When strictDaemon is true, daemon routes reject PAT/JWT fallback
+// authentication — only valid daemon tokens (mdt_ prefix) are accepted.
+func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.DaemonTokenCache, strictDaemon bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
@@ -125,6 +128,14 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				ctx = context.WithValue(ctx, ctxKeyDaemonID, identity.DaemonID)
 				ctx = context.WithValue(ctx, ctxKeyDaemonAuthPath, DaemonAuthPathDaemonToken)
 				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			// Strict mode: reject non-daemon-token auth when mdt_ token is
+			// absent or invalid. Do not fall through to PAT/JWT fallback.
+			if strictDaemon {
+				slog.Debug("daemon_auth: strict mode denied non-daemon-token", "path", r.URL.Path)
+				writeError(w, http.StatusUnauthorized, "daemon token required")
 				return
 			}
 
