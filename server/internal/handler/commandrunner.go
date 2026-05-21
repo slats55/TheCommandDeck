@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -52,7 +53,7 @@ func commandRunToResponse(run db.CommandRun) CommandRunnerRunResponse {
 		CreatedAt:        timestampToString(run.CreatedAt),
 	}
 	if run.ExitCode.Valid {
-		resp.ExitCode = (*int)(&run.ExitCode.Int.Int64)
+		resp.ExitCode = (*int32)(&run.ExitCode.Int)
 	}
 	if run.Stdout.Valid {
 		resp.Stdout = &run.Stdout.String
@@ -61,7 +62,7 @@ func commandRunToResponse(run db.CommandRun) CommandRunnerRunResponse {
 		resp.Stderr = &run.Stderr.String
 	}
 	if run.DurationMs.Valid {
-		resp.DurationMs = (*int)(&run.DurationMs.Int.Int64)
+		resp.DurationMs = (*int32)(&run.DurationMs.Int)
 	}
 	if run.StartedAt.Valid {
 		resp.StartedAt = timestampToPtr(run.StartedAt)
@@ -316,7 +317,7 @@ func (h *Handler) handleCommandRunnerTemplates(w http.ResponseWriter, r *http.Re
 		Description *string `json:"description,omitempty"`
 		Category    string  `json:"category"`
 		RiskLevel   string  `json:"risk_level"`
-		IsBuiltIn   bool    `json:"is_builtin"`
+		IsBuiltin bool    `json:"is_builtin"`
 		CreatedAt   string  `json:"created_at"`
 	}
 
@@ -328,7 +329,7 @@ func (h *Handler) handleCommandRunnerTemplates(w http.ResponseWriter, r *http.Re
 			Command:   t.Command,
 			Category:  t.Category,
 			RiskLevel: t.RiskLevel,
-			IsBuiltIn: t.IsBuiltIn,
+			IsBuiltin: t.IsBuiltin,
 			CreatedAt: timestampToString(t.CreatedAt),
 		}
 		if t.Description.Valid {
@@ -376,7 +377,7 @@ func (h *Handler) HandleDaemonCommandRunWS(ctx context.Context, identity daemonw
 		durationMs = pgtype.Int4{Int64: int64(result.DurationMs), Valid: true}
 	}
 
-	err = h.Queries.UpdateCommandRunResult(ctx, db.UpdateCommandRunResultParams{
+	_, err = h.Queries.UpdateCommandRunResult(ctx, db.UpdateCommandRunResultParams{
 		ID:         runID,
 		Status:     result.Status,
 		ExitCode:   exitCode,
