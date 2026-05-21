@@ -53,7 +53,8 @@ func commandRunToResponse(run db.CommandRun) CommandRunnerRunResponse {
 		CreatedAt:        timestampToString(run.CreatedAt),
 	}
 	if run.ExitCode.Valid {
-		resp.ExitCode = (*int32)(&run.ExitCode.Int32)
+		code := int(run.ExitCode.Int32)
+		resp.ExitCode = &code
 	}
 	if run.Stdout.Valid {
 		resp.Stdout = &run.Stdout.String
@@ -62,7 +63,8 @@ func commandRunToResponse(run db.CommandRun) CommandRunnerRunResponse {
 		resp.Stderr = &run.Stderr.String
 	}
 	if run.DurationMs.Valid {
-		resp.DurationMs = (*int32)(&run.DurationMs.Int32)
+		duration := int(run.DurationMs.Int32)
+		resp.DurationMs = &duration
 	}
 	if run.StartedAt.Valid {
 		resp.StartedAt = timestampToPtr(run.StartedAt)
