@@ -1,7 +1,8 @@
 // Package cmdexec provides safe, bounded command execution for CommandDeck.
-// Only pre-approved commands (currently: git status) are executed, using
-// argv-style execution to prevent shell injection. Working directory is
-// validated to ensure it stays within the runtime's workspace boundary.
+// Only pre-approved commands (currently: git status, git branch, git rev-parse)
+// are executed, using argv-style execution to prevent shell injection. Working
+// directory is validated to ensure it stays within the runtime's workspace
+// boundary.
 package cmdexec
 
 import (
@@ -33,11 +34,12 @@ type Executor struct {
 // NewExecutor creates a new command executor.
 // workspacesRoot is the daemon's workspaces root (e.g. ~/multica_workspaces).
 func NewExecutor(workspacesRoot string) *Executor {
-	// Slice 1: only "git status" and "git branch" are allowed.
+	// Slice 1: only "git status", "git branch", and "git rev-parse" are allowed.
 	allowed := map[string]map[string]bool{
 		"git": {
-			"status":  true,
-			"branch":  true,
+			"status":     true,
+			"branch":     true,
+			"rev-parse":  true,
 		},
 	}
 	return &Executor{
