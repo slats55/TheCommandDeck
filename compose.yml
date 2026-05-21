@@ -1,0 +1,116 @@
+# Command Deck Docker Compose — 4-service stack for production/VPS deployment
+#
+# Services: db (postgres), redis, api (backend), web (frontend)
+# Named volumes: pgdata, redisdata, backend_uploads
+# Healthchecks on db and redis; api and web wait for their dependencies
+#
+# Usage:
+#   cp .env.example .env
+#   # Edit .env — change JWT_SECRET at minimum
+#   docker compose up -d
+#   docker compose ps
+#
+# Ports:
+#   postgres :5432
+#   redis    :6379
+#   api      :8080
+#   web      :3000
+
+name: commanddeck
+
+services:
+  commanddeck-db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-commanddeck}
+      POSTGRES_USER: ${POSTGRES_USER:-commanddeck}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-commanddeck}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-commanddeck} -d ${POSTGRES_DB:-commanddeck}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  commanddeck-redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  commanddeck-api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      args:
+        VERSION: ${MULTICA_IMAGE_TAG:-dev}
+        COMMIT: ${COMMIT:-unknown}
+    depends_on:
+      commanddeck-db:
+        condition: service_healthy
+      commanddeck-redis:
+        condition: service_healthy
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - backend_uploads:/app/data/uploads
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-commanddeck}:${POSTGRES_PASSWORD:-commanddeck}@commanddeck-db:5432/${POSTGRES_DB:-commanddeck}?sslmode=disable
+      REDIS_URL: redis://commanddeck-redis:6379/0
+      PORT: "8080"
+      METRICS_ADDR: ${METRICS_ADDR:-}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-noreply@commanddeck.ai}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:3000/auth/callback}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-us-west-2}
+      CLOUDFRONT_DOMAIN: ${CLOUDFRONT_DOMAIN:-}
+      CLOUDFRONT_KEY_PAIR_ID: ${CLOUDFRONT_KEY_PAIR_ID:-}
+      CLOUDFRONT_PRIVATE_KEY: ${CLOUDFRONT_PRIVATE_KEY:-}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
+      APP_ENV: ${APP_ENV:-production}
+      MULTICA_DEV_VERIFICATION_CODE: ${MULTICA_DEV_VERIFICATION_CODE:-}
+      MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:3000}
+      ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
+      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+    restart: unless-stopped
+
+  commanddeck-web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        REMOTE_API_URL: http://commanddeck-api:8080
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
+        NEXT_PUBLIC_APP_VERSION: ${MULTICA_IMAGE_TAG:-dev}
+    depends_on:
+      - commanddeck-api
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      HOSTNAME: "0.0.0.0"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  backend_uploads:
