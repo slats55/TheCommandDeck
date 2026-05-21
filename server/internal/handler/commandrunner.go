@@ -358,7 +358,7 @@ func (h *Handler) HandleDaemonCommandRunWS(ctx context.Context, identity daemonw
 
 	var exitCode pgtype.Int4
 	if result.ExitCode >= 0 {
-		exitCode = pgtype.Int4{Int64: int64(result.ExitCode), Valid: true}
+		exitCode = pgtype.Int4{Int: int32(result.ExitCode), Valid: true}
 	}
 
 	now := time.Now()
@@ -374,7 +374,7 @@ func (h *Handler) HandleDaemonCommandRunWS(ctx context.Context, identity daemonw
 
 	var durationMs pgtype.Int4
 	if result.DurationMs >= 0 {
-		durationMs = pgtype.Int4{Int64: int64(result.DurationMs), Valid: true}
+		durationMs = pgtype.Int4{Int: int32(result.DurationMs), Valid: true}
 	}
 
 	_, err = h.Queries.UpdateCommandRunResult(ctx, db.UpdateCommandRunResultParams{
