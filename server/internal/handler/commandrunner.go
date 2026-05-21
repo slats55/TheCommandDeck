@@ -110,7 +110,8 @@ func (h *Handler) RequireCommandDeckRuntime(w http.ResponseWriter, r *http.Reque
 
 // HandleCommandRunnerRun dispatches a command execution request to the daemon
 // and creates a command_run record.
-func (h *Handler) HandleCommandRunnerRun(w http.ResponseWriter, r *http.Request, workspaceID string) {
+func (h *Handler) HandleCommandRunnerRun(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "workspaceID")
 	var req CommandRunnerRunRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -250,7 +251,8 @@ func (h *Handler) HandleCommandRunnerRun(w http.ResponseWriter, r *http.Request,
 }
 
 // HandleCommandRunnerGet returns a single command run by ID.
-func (h *Handler) HandleCommandRunnerGet(w http.ResponseWriter, r *http.Request, workspaceID string) {
+func (h *Handler) HandleCommandRunnerGet(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "workspaceID")
 	runID := chi.URLParam(r, "runId")
 	if runID == "" {
 		writeError(w, http.StatusBadRequest, "run_id is required")
@@ -278,7 +280,8 @@ func (h *Handler) HandleCommandRunnerGet(w http.ResponseWriter, r *http.Request,
 }
 
 // HandleCommandRunnerList returns command runs for the workspace.
-func (h *Handler) HandleCommandRunnerList(w http.ResponseWriter, r *http.Request, workspaceID string) {
+func (h *Handler) HandleCommandRunnerList(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "workspaceID")
 	ctx := r.Context()
 	wsUUID := util.MustParseUUID(workspaceID)
 
@@ -301,7 +304,8 @@ func (h *Handler) HandleCommandRunnerList(w http.ResponseWriter, r *http.Request
 }
 
 // HandleCommandRunnerTemplates returns available command templates for the workspace.
-func (h *Handler) HandleCommandRunnerTemplates(w http.ResponseWriter, r *http.Request, workspaceID string) {
+func (h *Handler) HandleCommandRunnerTemplates(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "workspaceID")
 	ctx := r.Context()
 	wsUUID := util.MustParseUUID(workspaceID)
 
