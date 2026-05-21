@@ -53,7 +53,7 @@ func commandRunToResponse(run db.CommandRun) CommandRunnerRunResponse {
 		CreatedAt:        timestampToString(run.CreatedAt),
 	}
 	if run.ExitCode.Valid {
-		resp.ExitCode = (*int32)(&run.ExitCode.Int)
+		resp.ExitCode = (*int32)(&run.ExitCode.Int32)
 	}
 	if run.Stdout.Valid {
 		resp.Stdout = &run.Stdout.String
@@ -62,7 +62,7 @@ func commandRunToResponse(run db.CommandRun) CommandRunnerRunResponse {
 		resp.Stderr = &run.Stderr.String
 	}
 	if run.DurationMs.Valid {
-		resp.DurationMs = (*int32)(&run.DurationMs.Int)
+		resp.DurationMs = (*int32)(&run.DurationMs.Int32)
 	}
 	if run.StartedAt.Valid {
 		resp.StartedAt = timestampToPtr(run.StartedAt)
@@ -358,7 +358,7 @@ func (h *Handler) HandleDaemonCommandRunWS(ctx context.Context, identity daemonw
 
 	var exitCode pgtype.Int4
 	if result.ExitCode >= 0 {
-		exitCode = pgtype.Int4{Int: int32(result.ExitCode), Valid: true}
+		exitCode = pgtype.Int4{Int32: int32(result.ExitCode), Valid: true}
 	}
 
 	now := time.Now()
@@ -374,7 +374,7 @@ func (h *Handler) HandleDaemonCommandRunWS(ctx context.Context, identity daemonw
 
 	var durationMs pgtype.Int4
 	if result.DurationMs >= 0 {
-		durationMs = pgtype.Int4{Int: int32(result.DurationMs), Valid: true}
+		durationMs = pgtype.Int4{Int32: int32(result.DurationMs), Valid: true}
 	}
 
 	_, err = h.Queries.UpdateCommandRunResult(ctx, db.UpdateCommandRunResultParams{
