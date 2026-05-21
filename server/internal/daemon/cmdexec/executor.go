@@ -1,7 +1,8 @@
 // Package cmdexec provides safe, bounded command execution for CommandDeck.
-// Only pre-approved commands (currently: git status) are executed, using
-// argv-style execution to prevent shell injection. Working directory is
-// validated to ensure it stays within the runtime's workspace boundary.
+// Only pre-approved commands (currently: git status, git branch, git rev-parse,
+// git diff) are executed, using argv-style execution to prevent shell injection.
+// Working directory is validated to ensure it stays within the runtime's workspace
+// boundary.
 package cmdexec
 
 import (
@@ -33,10 +34,13 @@ type Executor struct {
 // NewExecutor creates a new command executor.
 // workspacesRoot is the daemon's workspaces root (e.g. ~/multica_workspaces).
 func NewExecutor(workspacesRoot string) *Executor {
-	// Slice 1: only "git status" is allowed.
+	// Slice 1: only "git status", "git branch", "git rev-parse", and "git diff" are allowed.
 	allowed := map[string]map[string]bool{
 		"git": {
-			"status": true,
+			"status":     true,
+			"branch":     true,
+			"rev-parse":  true,
+			"diff":       true,
 		},
 	}
 	return &Executor{
@@ -75,7 +79,7 @@ func (e *Executor) Execute(ctx context.Context, command string, workingDir strin
 		}
 	}
 
-	// Step 2: parse the command into argv. Only "git status" is accepted.
+	// Step 2: parse the command into argv. Only approved commands are accepted.
 	argv, err := parseCommand(command)
 	if err != nil {
 		return Result{
@@ -194,8 +198,7 @@ func (e *Executor) isWithinBoundary(workingDir string) bool {
 // anything that looks like shell features (pipes, redirects, variable
 // expansion, etc.).
 //
-// In Slice 1, only "git status" is expected, but we parse generically
-// to allow future expansion.
+// Currently allows: git status, git branch, git rev-parse, git diff
 func parseCommand(command string) ([]string, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {

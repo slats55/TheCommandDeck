@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -53,7 +55,8 @@ func commandRunToResponse(run db.CommandRun) CommandRunnerRunResponse {
 		CreatedAt:        timestampToString(run.CreatedAt),
 	}
 	if run.ExitCode.Valid {
-		resp.ExitCode = (*int32)(&run.ExitCode.Int)
+		code := int(run.ExitCode.Int32)
+		resp.ExitCode = &code
 	}
 	if run.Stdout.Valid {
 		resp.Stdout = &run.Stdout.String
@@ -62,7 +65,8 @@ func commandRunToResponse(run db.CommandRun) CommandRunnerRunResponse {
 		resp.Stderr = &run.Stderr.String
 	}
 	if run.DurationMs.Valid {
-		resp.DurationMs = (*int32)(&run.DurationMs.Int)
+		duration := int(run.DurationMs.Int32)
+		resp.DurationMs = &duration
 	}
 	if run.StartedAt.Valid {
 		resp.StartedAt = timestampToPtr(run.StartedAt)
@@ -106,9 +110,10 @@ func (h *Handler) RequireCommandDeckRuntime(w http.ResponseWriter, r *http.Reque
 	return rt, true
 }
 
-// handleCommandRunnerRun dispatches a command execution request to the daemon
+// HandleCommandRunnerRun dispatches a command execution request to the daemon
 // and creates a command_run record.
-func (h *Handler) handleCommandRunnerRun(w http.ResponseWriter, r *http.Request, workspaceID string) {
+func (h *Handler) HandleCommandRunnerRun(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "workspaceID")
 	var req CommandRunnerRunRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -247,8 +252,9 @@ func (h *Handler) handleCommandRunnerRun(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, http.StatusCreated, commandRunToResponse(run))
 }
 
-// handleCommandRunnerGet returns a single command run by ID.
-func (h *Handler) handleCommandRunnerGet(w http.ResponseWriter, r *http.Request, workspaceID string) {
+// HandleCommandRunnerGet returns a single command run by ID.
+func (h *Handler) HandleCommandRunnerGet(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "workspaceID")
 	runID := chi.URLParam(r, "runId")
 	if runID == "" {
 		writeError(w, http.StatusBadRequest, "run_id is required")
@@ -275,8 +281,9 @@ func (h *Handler) handleCommandRunnerGet(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, http.StatusOK, commandRunToResponse(run))
 }
 
-// handleCommandRunnerList returns command runs for the workspace.
-func (h *Handler) handleCommandRunnerList(w http.ResponseWriter, r *http.Request, workspaceID string) {
+// HandleCommandRunnerList returns command runs for the workspace.
+func (h *Handler) HandleCommandRunnerList(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "workspaceID")
 	ctx := r.Context()
 	wsUUID := util.MustParseUUID(workspaceID)
 
@@ -298,8 +305,9 @@ func (h *Handler) handleCommandRunnerList(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// handleCommandRunnerTemplates returns available command templates for the workspace.
-func (h *Handler) handleCommandRunnerTemplates(w http.ResponseWriter, r *http.Request, workspaceID string) {
+// HandleCommandRunnerTemplates returns available command templates for the workspace.
+func (h *Handler) HandleCommandRunnerTemplates(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "workspaceID")
 	ctx := r.Context()
 	wsUUID := util.MustParseUUID(workspaceID)
 
@@ -358,7 +366,7 @@ func (h *Handler) HandleDaemonCommandRunWS(ctx context.Context, identity daemonw
 
 	var exitCode pgtype.Int4
 	if result.ExitCode >= 0 {
-		exitCode = pgtype.Int4{Int: int32(result.ExitCode), Valid: true}
+		exitCode = pgtype.Int4{Int32: int32(result.ExitCode), Valid: true}
 	}
 
 	now := time.Now()
@@ -374,7 +382,7 @@ func (h *Handler) HandleDaemonCommandRunWS(ctx context.Context, identity daemonw
 
 	var durationMs pgtype.Int4
 	if result.DurationMs >= 0 {
-		durationMs = pgtype.Int4{Int: int32(result.DurationMs), Valid: true}
+		durationMs = pgtype.Int4{Int32: int32(result.DurationMs), Valid: true}
 	}
 
 	_, err = h.Queries.UpdateCommandRunResult(ctx, db.UpdateCommandRunResultParams{
@@ -392,6 +400,36 @@ func (h *Handler) HandleDaemonCommandRunWS(ctx context.Context, identity daemonw
 		return err
 	}
 
+	// Fetch the full command_run row to populate the ledger entry.
+	runRow, err := h.Queries.GetCommandRun(ctx, runID)
+	if err != nil {
+		slog.Warn("GetCommandRun failed during ledger write", "run_id", result.CommandRunID, "error", err)
+	} else {
+		stdoutHash := hashString(result.Stdout)
+		stderrHash := hashString(result.Stderr)
+		_, err = h.Queries.CreateCommandLedgerEntry(ctx, db.CreateCommandLedgerEntryParams{
+			CommandRunID:    runRow.ID,
+			WorkspaceID:     runRow.WorkspaceID,
+			TemplateID:      runRow.TemplateID,
+			RuntimeID:       runRow.RuntimeID,
+			Command:         runRow.Command,
+			Arguments:       runRow.Arguments,
+			WorkingDirectory: runRow.WorkingDirectory,
+			InitiatorType:  runRow.InitiatorType,
+			InitiatorID:    runRow.InitiatorID,
+			Status:         result.Status,
+			ExitCode:       exitCode,
+			StdoutHash:     toText(stdoutHash),
+			StderrHash:     toText(stderrHash),
+			StartedAt:       startedAt,
+			FinishedAt:      finishedAt,
+			DurationMs:     durationMs,
+		})
+		if err != nil {
+			slog.Warn("CreateCommandLedgerEntry failed (best-effort, non-blocking)", "run_id", result.CommandRunID, "error", err)
+		}
+	}
+
 	slog.Info("command run completed", "run_id", result.CommandRunID, "status", result.Status)
 	return nil
 }
@@ -399,6 +437,15 @@ func (h *Handler) HandleDaemonCommandRunWS(ctx context.Context, identity daemonw
 // toText converts a string to a nullable pgtype.Text.
 func toText(s string) pgtype.Text {
 	return pgtype.Text{String: s, Valid: s != ""}
+}
+
+// hashString returns the SHA256 hex digest of a string.
+func hashString(s string) string {
+	if s == "" {
+		return ""
+	}
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
 }
 
 // isPrefixedBy returns true if s starts with prefix.

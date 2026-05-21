@@ -113,7 +113,7 @@ type Daemon struct {
 // SetCommandRunHandler installs the cmdexec handler once the WS connection is live.
 // The writes channel is the daemon's WS write queue — sending on it is the same
 // as writing to the WebSocket connection.
-func (d *Daemon) SetCommandRunHandler(writes chan<- []byte) {
+func (d *Daemon) SetCommandRunHandler(writes chan []byte) {
 	d.cmdexecHandler = cmdexec.NewWebSocketHandler(d.cfg.WorkspacesRoot, writes, d.logger)
 }
 
