@@ -1,5 +1,5 @@
 // Package cmdexec provides safe, bounded command execution for CommandDeck.
-// Only pre-approved commands (currently: git status) are executed, using
+// Only pre-approved commands (currently: "git status", "git branch --show-current") are executed, using
 // argv-style execution to prevent shell injection. Working directory is
 // validated to ensure it stays within the runtime's workspace boundary.
 package cmdexec
@@ -34,9 +34,16 @@ type Executor struct {
 // workspacesRoot is the daemon's workspaces root (e.g. ~/multica_workspaces).
 func NewExecutor(workspacesRoot string) *Executor {
 	// Slice 1: only "git status" is allowed.
+	// Slice 3: adds "git branch --show-current" (argv style: ["git", "branch", "--show-current"]).
+	// Full argv[1:] tokens must each match an entry in the allowlist.
+	// "git status"                   → ["git", "status"]  ✓
+	// "git branch --show-current"    → ["git", "branch", "--show-current"]  ✓
+	// "git push"                     → rejected (not in allowlist)
 	allowed := map[string]map[string]bool{
 		"git": {
-			"status": true,
+			"status":              true,
+			"branch":              true,
+			"--show-current":      true,
 		},
 	}
 	return &Executor{
@@ -153,6 +160,8 @@ func (e *Executor) Execute(ctx context.Context, command string, workingDir strin
 
 // isAllowed checks if the argv matches an entry in the allowlist.
 // Example: ["git", "status"] is allowed; ["git", "push"] is not.
+// For sequences: ["git", "branch", "--show-current"] checks "branch" in allowlist
+// and "--show-current" as an allowed arg under "branch".
 func (e *Executor) isAllowed(argv []string) bool {
 	if len(argv) < 2 {
 		return false
@@ -164,7 +173,17 @@ func (e *Executor) isAllowed(argv []string) bool {
 	if !ok {
 		return false
 	}
-	return subCommands[subCmd]
+	if !subCommands[subCmd] {
+		return false
+	}
+	// If there are additional args (argv[2:]), verify they are allowed
+	// for this subcommand.
+	for i := 2; i < len(argv); i++ {
+		if !subCommands[argv[i]] {
+			return false
+		}
+	}
+	return true
 }
 
 // isWithinBoundary returns true if workingDir is within the workspacesRoot
@@ -194,8 +213,9 @@ func (e *Executor) isWithinBoundary(workingDir string) bool {
 // anything that looks like shell features (pipes, redirects, variable
 // expansion, etc.).
 //
-// In Slice 1, only "git status" is expected, but we parse generically
-// to allow future expansion.
+// Slice 1 supports: "git status"
+// Slice 3 adds:     "git branch --show-current"
+// The parser accepts any number of tokens as long as no shell chars are present.
 func parseCommand(command string) ([]string, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
@@ -211,16 +231,16 @@ func parseCommand(command string) ([]string, error) {
 		}
 	}
 
-	// Simple space split — sufficient for "git status" and similar.
-	// Split into at most 2 parts: binary and subcommand + potential args.
-	// Args are not supported in Slice 1, so we validate there are at most 2 tokens.
+	// Space split — supports "git status", "git branch --show-current",
+	// and any future approved argv sequence. All tokens are validated
+	// against the allowlist in isAllowed().
 	parts := strings.Fields(command)
 	if len(parts) == 0 {
 		return nil, &parseError{command, "empty after trim"}
 	}
-	if len(parts) > 2 {
-		// "binary subcommand arg1 arg2 ..." — reject args in Slice 1.
-		return nil, &parseError{command, "arguments not supported in Slice 1"}
+	if len(parts) > 16 {
+		// Defensive upper bound on token count.
+		return nil, &parseError{command, "too many tokens"}
 	}
 
 	return parts, nil
