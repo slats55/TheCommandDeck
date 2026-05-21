@@ -33,10 +33,11 @@ type Executor struct {
 // NewExecutor creates a new command executor.
 // workspacesRoot is the daemon's workspaces root (e.g. ~/multica_workspaces).
 func NewExecutor(workspacesRoot string) *Executor {
-	// Slice 1: only "git status" is allowed.
+	// Slice 1: only "git status" and "git branch" are allowed.
 	allowed := map[string]map[string]bool{
 		"git": {
-			"status": true,
+			"status":  true,
+			"branch":  true,
 		},
 	}
 	return &Executor{
