@@ -132,16 +132,16 @@ docker compose pull && docker compose up -d
 ## Rollback to Previous Tag
 
 ```bash
-# 1. Edit compose.yml: change image tag from :dev to :<previous-sha>
-#    e.g., image: mtvalines/commanddeck-api:24a5909
+# 1. Pin the desired image tag
+export COMMANDDECK_IMAGE_TAG="<previous-sha>"   # e.g., 24a5909
 
 # 2. Pull the pinned image
-docker compose pull
+docker compose -f compose.yml -f compose.prod.yml pull
 
 # 3. Recreate containers with the older image
-docker compose up -d --force-recreate
+docker compose -f compose.yml -f compose.prod.yml up -d --force-recreate
 
-# To revert back to :dev, undo the tag change and repeat steps 2–3.
+# To revert back to :latest, set COMMANDDECK_IMAGE_TAG=latest and repeat steps 2–3.
 ```
 
 ---
@@ -212,11 +212,14 @@ If you accidentally delete `pgdata`:
 ```bash
 # Check if already logged in
 docker info | grep -i Username
+# Expected: Username: sleeper0
 
-# Login to Docker Hub (interactive — paste token when prompted)
-docker login
+# Login using an access token (secure method — does not print token):
+read -s DOCKER_TOKEN
+echo "$DOCKER_TOKEN" | docker login -u sleeper0 --password-stdin
+unset DOCKER_TOKEN
 
-# After login, verify:
+# Verify login:
 docker pull alpine:latest
 
 # Logout when done (not needed for push/pull, but good practice on shared machines)
@@ -227,29 +230,84 @@ docker logout
 
 ---
 
-## Build and Push Images
+## Build, Tag, and Push Images to Docker Hub
 
 ```bash
 # Set variables
-export DOCKER_NAMESPACE="mtvalines"    # confirm this with Myles
+export DOCKER_NAMESPACE="sleeper0"
 export SHORT_SHA=$(git rev-parse --short HEAD)
 
-# Build API image with two tags
-docker build -t $DOCKER_NAMESPACE/commanddeck-api:dev \
-             -t $DOCKER_NAMESPACE/commanddeck-api:$SHORT_SHA \
-             -f apps/api/Dockerfile .
+# Build API image with three tags
+docker build \
+  -t "$DOCKER_NAMESPACE/commanddeck-api:dev" \
+  -t "$DOCKER_NAMESPACE/commanddeck-api:latest" \
+  -t "$DOCKER_NAMESPACE/commanddeck-api:$SHORT_SHA" \
+  -f apps/api/Dockerfile \
+  .
 
-# Build Web image with two tags
-docker build -t $DOCKER_NAMESPACE/commanddeck-web:dev \
-             -t $DOCKER_NAMESPACE/commanddeck-web:$SHORT_SHA \
-             -f apps/web/Dockerfile .
+# Build Web image with three tags
+docker build \
+  -t "$DOCKER_NAMESPACE/commanddeck-web:dev" \
+  -t "$DOCKER_NAMESPACE/commanddeck-web:latest" \
+  -t "$DOCKER_NAMESPACE/commanddeck-web:$SHORT_SHA" \
+  -f apps/web/Dockerfile \
+  .
 
-# Push all four tags
-docker push $DOCKER_NAMESPACE/commanddeck-api:dev
-docker push $DOCKER_NAMESPACE/commanddeck-api:$SHORT_SHA
-docker push $DOCKER_NAMESPACE/commanddeck-web:dev
-docker push $DOCKER_NAMESPACE/commanddeck-web:$SHORT_SHA
+# Push API tags
+docker push "$DOCKER_NAMESPACE/commanddeck-api:dev"
+docker push "$DOCKER_NAMESPACE/commanddeck-api:latest"
+docker push "$DOCKER_NAMESPACE/commanddeck-api:$SHORT_SHA"
+
+# Push Web tags
+docker push "$DOCKER_NAMESPACE/commanddeck-web:dev"
+docker push "$DOCKER_NAMESPACE/commanddeck-web:latest"
+docker push "$DOCKER_NAMESPACE/commanddeck-web:$SHORT_SHA"
 ```
+
+## Pull Verification
+
+After pushing, verify images can be pulled back from Docker Hub:
+
+```bash
+# Pull all API tags
+docker pull "$DOCKER_NAMESPACE/commanddeck-api:dev"
+docker pull "$DOCKER_NAMESPACE/commanddeck-api:latest"
+docker pull "$DOCKER_NAMESPACE/commanddeck-api:$SHORT_SHA"
+
+# Pull all Web tags
+docker pull "$DOCKER_NAMESPACE/commanddeck-web:dev"
+docker pull "$DOCKER_NAMESPACE/commanddeck-web:latest"
+docker pull "$DOCKER_NAMESPACE/commanddeck-web:$SHORT_SHA"
+
+# Verify each image is inspectable
+docker image inspect "$DOCKER_NAMESPACE/commanddeck-api:dev" >/dev/null && echo "API_DEV_PULL_OK"
+docker image inspect "$DOCKER_NAMESPACE/commanddeck-api:latest" >/dev/null && echo "API_LATEST_PULL_OK"
+docker image inspect "$DOCKER_NAMESPACE/commanddeck-api:$SHORT_SHA" >/dev/null && echo "API_SHA_PULL_OK"
+docker image inspect "$DOCKER_NAMESPACE/commanddeck-web:dev" >/dev/null && echo "WEB_DEV_PULL_OK"
+docker image inspect "$DOCKER_NAMESPACE/commanddeck-web:latest" >/dev/null && echo "WEB_LATEST_PULL_OK"
+docker image inspect "$DOCKER_NAMESPACE/commanddeck-web:$SHORT_SHA" >/dev/null && echo "WEB_SHA_PULL_OK"
+```
+
+## Registry-Based Deployment (compose.prod.yml)
+
+Use `compose.prod.yml` to deploy from Docker Hub images instead of building locally:
+
+```bash
+# Pull and start from Docker Hub images using a specific tag
+export COMMANDDECK_IMAGE_TAG="$SHORT_SHA"
+
+docker compose -f compose.yml -f compose.prod.yml pull
+docker compose -f compose.yml -f compose.prod.yml up -d
+docker compose -f compose.yml -f compose.prod.yml ps
+
+# Verify runtime
+curl -i http://127.0.0.1:8080/health
+curl -I http://127.0.0.1:3000
+
+# To use :latest instead, omit or set COMMANDDECK_IMAGE_TAG=latest
+```
+
+`compose.prod.yml` overrides `commanddeck-api` and `commanddeck-web` services to pull pre-built images from Docker Hub instead of building from Dockerfiles. It uses `!reset null` on the `build` key to disable local builds.
 
 ---
 
@@ -262,13 +320,13 @@ docker push $DOCKER_NAMESPACE/commanddeck-web:$SHORT_SHA
 docker scout version || true
 
 # Quick overview of an image
-docker scout quickview mtvalines/commanddeck-api:dev || true
+docker scout quickview sleeper0/commanddeck-api:dev || true
 
 # Show CVEs for an image
-docker scout cves mtvalines/commanddeck-api:dev || true
+docker scout cves sleeper0/commanddeck-api:dev || true
 
 # Compare two image versions
-docker scout compare mtvalines/commanddeck-api:dev mtvalines/commanddeck-api:$SHORT_SHA || true
+docker scout compare sleeper0/commanddeck-api:dev sleeper0/commanddeck-api:$SHORT_SHA || true
 ```
 
 If Scout is not available, perform manual CVE checks:
@@ -353,6 +411,6 @@ curl http://localhost:3000
 
 ---
 
-*Maintained by: Mr.R9 (Primary Builder)*
-*Last updated: 2026-05-21*
+*Maintained by: Mr.R9 (Primary Builder), Mr.Commander (VPS Coordinator)*
+*Last updated: 2026-05-21 (COMMANDDECK-DOCKER-HUB-PUBLISH-001)*
 *File: docs/agent-brain/runbooks/DOCKER-RUNBOOK.md*

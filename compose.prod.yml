@@ -1,0 +1,12 @@
+# compose.prod.yml — Registry-based override for production Docker Hub images.
+# Usage: docker compose -f compose.yml -f compose.prod.yml up -d
+# Overrides API and Web to pull from Docker Hub instead of local builds.
+
+services:
+  commanddeck-api:
+    image: sleeper0/commanddeck-api:${COMMANDDECK_IMAGE_TAG:-latest}
+    build: !reset null
+
+  commanddeck-web:
+    image: sleeper0/commanddeck-web:${COMMANDDECK_IMAGE_TAG:-latest}
+    build: !reset null
