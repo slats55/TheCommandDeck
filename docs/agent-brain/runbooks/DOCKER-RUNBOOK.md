@@ -38,6 +38,9 @@ If `docker ps` fails with permission denied: `sudo usermod -aG docker $USER` the
 # Start the stack (detached)
 docker compose up -d
 
+# Start with dev override (local source builds instead of pulling from registry)
+docker compose -f compose.yml -f compose.dev.yml up -d --build
+
 # Stop all services
 docker compose down
 
