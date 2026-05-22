@@ -339,26 +339,102 @@ If Scout is not available, perform manual CVE checks:
 
 ## Buildx / Cloud Builder
 
-> Requires Docker Pro with Build Cloud enabled.
+> **Docker Build Cloud requires Docker Desktop with a Docker subscription (Pro/Team/Business).**
+> The `cloud` driver is NOT available on Docker Engine-only Linux installations.
+> This VPS runs Docker Engine 29.1.3 with buildx v0.34.1 — the `cloud` driver is absent.
+
+### Current Status (as of 2026-05-22)
+
+- **Docker Build Cloud: BLOCKED** — `cloud` driver not available on Docker Engine Linux
+- Available drivers: `docker-container`, `kubernetes`, `remote`
+- No cloud builder can be created without Docker Desktop or a Docker subscription that enables headless cloud builds
+
+### How to Check
 
 ```bash
 # List available builders
 docker buildx ls
 
-# Create a cloud builder (replace ORG/BUILDER_NAME with actual values)
-docker buildx create --driver cloud ORG/BUILDER_NAME
+# Check what drivers are available
+docker buildx create --help | grep "driver"
 
-# Use cloud builder to build and push
-docker buildx build \
-  --builder cloud-ORG-BUILDER_NAME \
-  --platform linux/amd64 \
-  -t $DOCKER_NAMESPACE/commanddeck-api:dev \
-  --push \
-  -f apps/api/Dockerfile .
-
-# Inspect cloud builder performance
-docker buildx inspect --builder cloud-ORG-BUILDER_NAME
+# Available drivers (Docker Engine Linux, no Desktop):
+#   docker-container, kubernetes, remote
+# Missing: cloud (Docker Desktop / Docker Pro only)
 ```
+
+### What to Do If Docker Build Cloud Is Not Enabled
+
+1. **Option A — Docker Desktop**: Install Docker Desktop on a supported machine (macOS, Windows, Linux with GUI). Docker Desktop includes the `cloud` driver. Sign in with the `sleeper0` Docker Hub account and enable Build Cloud in Settings.
+2. **Option B — Docker Subscription**: Check if the `sleeper0` Docker Hub account has a Pro, Team, or Business subscription. Docker Build Cloud minutes are included in paid plans. The cloud builder can then be created via the Docker Desktop UI or CLI.
+3. **Option C — Self-Hosted BuildKit**: For remote builds without Docker Build Cloud, use the `remote` driver pointing to a self-hosted BuildKit instance. This is NOT Docker Build Cloud but provides remote build capabilities.
+
+### Cloud Builder Commands (Requires Docker Desktop / Pro Subscription)
+
+Once the `cloud` driver is available:
+
+```bash
+# List builders (cloud builders will appear here)
+docker buildx ls
+
+# Create a cloud builder
+docker buildx create --driver cloud sleeper0/default --name commanddeck-cloud-builder
+
+# Build and push API image via cloud builder
+docker buildx build \
+  --builder commanddeck-cloud-builder \
+  --platform linux/amd64 \
+  -t sleeper0/commanddeck-api:cloud-dev \
+  -t sleeper0/commanddeck-api:cloud-$(git rev-parse --short HEAD) \
+  -f apps/api/Dockerfile \
+  --push \
+  .
+
+# Build and push Web image via cloud builder
+docker buildx build \
+  --builder commanddeck-cloud-builder \
+  --platform linux/amd64 \
+  -t sleeper0/commanddeck-web:cloud-dev \
+  -t sleeper0/commanddeck-web:cloud-$(git rev-parse --short HEAD) \
+  -f apps/web/Dockerfile \
+  --push \
+  .
+
+# Pull-verify cloud-built images
+docker pull sleeper0/commanddeck-api:cloud-dev
+docker pull sleeper0/commanddeck-api:cloud-$(git rev-parse --short HEAD)
+docker pull sleeper0/commanddeck-web:cloud-dev
+docker pull sleeper0/commanddeck-web:cloud-$(git rev-parse --short HEAD)
+```
+
+### Safe Token Login Reminder
+
+```bash
+# Always use stdin (never pass token as CLI argument)
+read -s DOCKER_TOKEN
+echo "$DOCKER_TOKEN" | docker login -u sleeper0 --password-stdin
+unset DOCKER_TOKEN
+```
+
+### Local Container-Based Buildx (Alternative to Cloud Builder)
+
+If Docker Build Cloud is not available, the `docker-container` driver provides an isolated BuildKit container for builds:
+
+```bash
+# Create a local container-based builder
+docker buildx create --driver docker-container --name local-builder --use
+
+# Build with the container builder (local, NOT cloud)
+docker buildx build \
+  --builder local-builder \
+  --platform linux/amd64 \
+  -t sleeper0/commanddeck-api:dev \
+  --load \
+  -f apps/api/Dockerfile \
+  .
+```
+
+> **Note**: This is a local build — not Docker Build Cloud. Use only when cloud builder is unavailable.
 
 ---
 
@@ -412,5 +488,5 @@ curl http://localhost:3000
 ---
 
 *Maintained by: Mr.R9 (Primary Builder), Mr.Commander (VPS Coordinator)*
-*Last updated: 2026-05-21 (COMMANDDECK-DOCKER-HUB-PUBLISH-001)*
+*Last updated: 2026-05-22 (COMMANDDECK-CLOUD-BUILDER-DEPLOY-001 — BLOCKED)*
 *File: docs/agent-brain/runbooks/DOCKER-RUNBOOK.md*
