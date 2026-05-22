@@ -1,0 +1,19 @@
+# Local development override for compose.yml
+# Enables local image builds instead of pulling from a registry
+#
+# Usage:
+#   docker compose -f compose.yml -f compose.dev.yml build
+#   docker compose -f compose.yml -f compose.dev.yml up -d
+
+version: "3.8"
+
+services:
+  commanddeck-api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+
+  commanddeck-web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
