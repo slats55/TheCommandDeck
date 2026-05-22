@@ -10,8 +10,8 @@ version: "3.8"
 services:
   commanddeck-api:
     build:
-      context: ./server
-      dockerfile: ../apps/api/Dockerfile
+      context: .
+      dockerfile: apps/api/Dockerfile
 
   commanddeck-web:
     build:
