@@ -215,15 +215,24 @@ func parseCommand(command string) ([]string, error) {
 	}
 
 	// Simple space split — sufficient for "git status" and similar.
-	// Split into at most 2 parts: binary and subcommand + potential args.
-	// Args are not supported in Slice 1, so we validate there are at most 2 tokens.
+	// Split into at most 3 parts for the two approved 3-token safe forms:
+	//   git branch --show-current  (3 tokens, --show-current is a safe flag)
+	//   git rev-parse HEAD         (3 tokens, HEAD is a fixed ref, not user input)
+	// All other arguments are rejected in Slice 1.
 	parts := strings.Fields(command)
 	if len(parts) == 0 {
 		return nil, &parseError{command, "empty after trim"}
 	}
-	if len(parts) > 2 {
+	if len(parts) > 3 {
 		// "binary subcommand arg1 arg2 ..." — reject args in Slice 1.
 		return nil, &parseError{command, "arguments not supported in Slice 1"}
+	}
+	if len(parts) == 3 {
+		// Only allow 3 tokens for the two known-safe read-only forms.
+		if !((parts[0] == "git" && parts[1] == "branch" && parts[2] == "--show-current") ||
+			(parts[0] == "git" && parts[1] == "rev-parse" && parts[2] == "HEAD")) {
+			return nil, &parseError{command, "arguments not supported in Slice 1"}
+		}
 	}
 
 	return parts, nil
