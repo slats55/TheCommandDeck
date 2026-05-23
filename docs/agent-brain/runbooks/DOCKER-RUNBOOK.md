@@ -293,21 +293,74 @@ docker image inspect "$DOCKER_NAMESPACE/commanddeck-web:$SHORT_SHA" >/dev/null &
 Use `compose.prod.yml` to deploy from Docker Hub images instead of building locally:
 
 ```bash
-# Pull and start from Docker Hub images using a specific tag
-export COMMANDDECK_IMAGE_TAG="$SHORT_SHA"
+# 1. Set the image tag (use a commit SHA for immutable pinning, or 'latest' for rolling)
+export COMMANDDECK_IMAGE_TAG="<commit-sha>"   # e.g., aa089dc4
 
+# 2. Pull images from Docker Hub
 docker compose -f compose.yml -f compose.prod.yml pull
+
+# 3. Validate merged config
+docker compose -f compose.yml -f compose.prod.yml config | grep -E "^\s+image:"
+
+# 4. Stop current containers (preserves volumes)
+docker compose -f compose.yml down
+
+# 5. Start with registry images
 docker compose -f compose.yml -f compose.prod.yml up -d
-docker compose -f compose.yml -f compose.prod.yml ps
 
-# Verify runtime
-curl -i http://127.0.0.1:8080/health
-curl -I http://127.0.0.1:3000
+# 6. Verify containers are running from registry images
+docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
 
-# To use :latest instead, omit or set COMMANDDECK_IMAGE_TAG=latest
+# Required image names:
+#   commanddeck-commanddeck-api-1     sleeper0/commanddeck-api:<tag>
+#   commanddeck-commanddeck-web-1     sleeper0/commanddeck-web:<tag>
+# If containers show locally built images (no sleeper0/ prefix), deployment is NOT complete.
+
+# 7. Verify runtime health
+curl -i http://127.0.0.1:8080/health   # expect 200
+curl -I http://127.0.0.1:3000           # expect 200
 ```
 
+### Cloud Builder Tags
+
+Cloud-built images use the `cloud-<commit-sha>` tag convention (e.g., `cloud-aa089dc4`):
+
+```bash
+export COMMANDDECK_IMAGE_TAG="cloud-aa089dc4"
+
+# Pull cloud images specifically
+docker pull sleeper0/commanddeck-api:cloud-aa089dc4
+docker pull sleeper0/commanddeck-web:cloud-aa089dc4
+
+# Deploy with compose.prod.yml (same workflow as above)
+docker compose -f compose.yml -f compose.prod.yml pull
+docker compose -f compose.yml -f compose.prod.yml up -d
+```
+
+If cloud-tag deployment fails for image-related reasons, fall back to `latest`:
+```bash
+export COMMANDDECK_IMAGE_TAG="latest"
+docker compose -f compose.yml -f compose.prod.yml up -d
+```
+Report why the fallback was needed.
+
 `compose.prod.yml` overrides `commanddeck-api` and `commanddeck-web` services to pull pre-built images from Docker Hub instead of building from Dockerfiles. It uses `!reset null` on the `build` key to disable local builds.
+
+### Production Registry Deployment Checklist
+
+- [ ] VPS Docker runtime works (`docker run --rm alpine echo OK`)
+- [ ] `compose.prod.yml` exists and validates
+- [ ] Docker Hub auth active (`docker info | grep Username`)
+- [ ] Cloud images pullable from Docker Hub
+- [ ] `COMMANDDECK_IMAGE_TAG` set to the desired tag
+- [ ] Stack starts with `compose.prod.yml`
+- [ ] `docker ps` shows `sleeper0/commanddeck-api:<tag>` and `sleeper0/commanddeck-web:<tag>`
+- [ ] DB and Redis healthy
+- [ ] API `/health` returns 200
+- [ ] Web `/` returns 200
+- [ ] No crash loops in logs
+- [ ] No secrets committed to repo
+- [ ] No `docker compose down -v` used
 
 ---
 
@@ -412,5 +465,5 @@ curl http://localhost:3000
 ---
 
 *Maintained by: Mr.R9 (Primary Builder), Mr.Commander (VPS Coordinator)*
-*Last updated: 2026-05-21 (COMMANDDECK-DOCKER-HUB-PUBLISH-001)*
+*Last updated: 2026-05-23 (COMMANDDECK-PROD-REGISTRY-DEPLOY-001)*
 *File: docs/agent-brain/runbooks/DOCKER-RUNBOOK.md*
