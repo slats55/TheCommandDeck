@@ -84,6 +84,11 @@ import type {
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
+  CommandTemplate,
+  CommandRun,
+  CommandRunExecuteRequest,
+  CommandRunListResponse,
+  CommandTemplatesResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -1331,5 +1336,27 @@ export class ApiClient {
 
   async listIssuePullRequests(issueId: string): Promise<{ pull_requests: GitHubPullRequest[] }> {
     return this.fetch(`/api/issues/${issueId}/pull-requests`);
+  }
+
+  // Command Runner (CommandDeck)
+  async listCommandTemplates(workspaceId?: string): Promise<CommandTemplatesResponse> {
+    const search = new URLSearchParams();
+    if (workspaceId) search.set("workspace_id", workspaceId);
+    return this.fetch(`/api/commandrunner/templates?${search}`);
+  }
+
+  async runCommand(data: CommandRunExecuteRequest): Promise<CommandRun> {
+    return this.fetch("/api/commandrunner/run", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getCommandRun(runId: string): Promise<CommandRun> {
+    return this.fetch(`/api/commandrunner/run/${runId}`);
+  }
+
+  async listCommandRuns(): Promise<CommandRunListResponse> {
+    return this.fetch("/api/commandrunner/runs");
   }
 }
