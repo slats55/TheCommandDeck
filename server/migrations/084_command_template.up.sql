@@ -20,14 +20,13 @@ CREATE TABLE command_template (
 CREATE INDEX idx_command_template_workspace ON command_template(workspace_id);
 CREATE INDEX idx_command_template_category ON command_template(category);
 
--- Seed the built-in git status template
-INSERT INTO command_template (workspace_id, name, command, description, category, risk_level, is_builtin)
-VALUES (
-    '00000000-0000-0000-0000-000000000000', -- placeholder, updated per-workspace at runtime
-    'Git Status',
-    'git status',
-    'Show the working tree status of the repository',
-    'git',
-    'low',
-    true
-);
+-- Seed the built-in command templates.
+-- workspace_id '00000000-...' is a reserved marker. GetCommandTemplateByName
+-- matches it as a fallback so built-in templates are resolvable by any
+-- real workspace UUID. Each template can be overridden per-workspace by
+-- inserting a row with the real workspace_id and the same name.
+INSERT INTO command_template (workspace_id, name, command, description, category, risk_level, is_builtin) VALUES
+    ('00000000-0000-0000-0000-000000000000', 'Git Status',     'git status',                'Show the working tree status',                     'git', 'low', true),
+    ('00000000-0000-0000-0000-000000000000', 'Git Branch',     'git branch --show-current', 'Show the current branch name',                  'git', 'low', true),
+    ('00000000-0000-0000-0000-000000000000', 'Git Rev-Parse',  'git rev-parse HEAD',        'Show the current commit hash',                    'git', 'low', true),
+    ('00000000-0000-0000-0000-000000000000', 'Git Diff --Stat','git diff --stat',           'Show diff summary (names + insertions/deletions)', 'git', 'low', true);

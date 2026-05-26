@@ -215,15 +215,15 @@ func parseCommand(command string) ([]string, error) {
 	}
 
 	// Simple space split — sufficient for "git status" and similar.
-	// Split into at most 2 parts: binary and subcommand + potential args.
-	// Args are not supported in Slice 1, so we validate there are at most 2 tokens.
+	// Split into at most 3 parts: binary, subcommand, and one optional arg.
+	// Args are not supported in Slice 1 beyond one flag, so we validate at most 3 tokens.
 	parts := strings.Fields(command)
 	if len(parts) == 0 {
 		return nil, &parseError{command, "empty after trim"}
 	}
-	if len(parts) > 2 {
-		// "binary subcommand arg1 arg2 ..." — reject args in Slice 1.
-		return nil, &parseError{command, "arguments not supported in Slice 1"}
+	if len(parts) > 3 {
+		// "binary subcommand arg1 arg2 ..." — reject args beyond the one allowed flag.
+		return nil, &parseError{command, "too many tokens: max 3 (binary subcommand [arg])"}
 	}
 
 	return parts, nil
