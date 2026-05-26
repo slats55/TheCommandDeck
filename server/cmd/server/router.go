@@ -140,6 +140,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Wire WS heartbeat after stores are finalized so the WS path uses the
 	// same (possibly Redis-backed) stores as the HTTP path.
 	daemonHub.SetHeartbeatHandler(h.HandleDaemonWSHeartbeat)
+	daemonHub.SetCommandRunHandler(h.HandleDaemonCommandRunWS)
 	health := newServerHealth(pool)
 
 	r := chi.NewRouter()
@@ -466,6 +467,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/usage", func(r chi.Router) {
 				r.Get("/daily", h.GetWorkspaceUsageByDay)
 				r.Get("/summary", h.GetWorkspaceUsageSummary)
+			})
+
+			// Command Runner
+			r.Route("/api/commandrunner", func(r chi.Router) {
+				r.Get("/templates", h.HandleCommandRunnerTemplates)
+				r.Post("/run", h.HandleCommandRunnerRun)
+				r.Get("/run/{runId}", h.HandleCommandRunnerGet)
+				r.Get("/runs", h.HandleCommandRunnerList)
 			})
 
 			// Runtimes

@@ -123,6 +123,10 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 		d.runWSHeartbeatSender(heartbeatCtx, runtimeIDs, writes)
 	}()
 
+	// Wire the command-run executor into this WS connection's write queue.
+	// SetCommandRunHandler is idempotent; calling it again replaces the handler.
+	d.SetCommandRunHandler(writes)
+
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- d.readTaskWakeupMessages(conn, taskWakeups)
@@ -287,6 +291,10 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 				continue
 			}
 			d.handleWSHeartbeatAck(context.Background(), &ack)
+		case protocol.CommandRunExecute:
+			if d.cmdexecHandler != nil {
+				d.cmdexecHandler.Handle(msg.Payload)
+			}
 		}
 	}
 }
