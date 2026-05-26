@@ -164,7 +164,7 @@ export default function CommandDeckPage() {
             >
               <option value="">-- Select a runtime --</option>
               {runtimes
-                .filter((rt) => rt.status === "online" || rt.status === "busy")
+                .filter((rt) => rt.status === "online")
                 .map((rt) => (
                   <option key={rt.id} value={rt.id}>
                     {rt.name ?? rt.id} ({rt.status})

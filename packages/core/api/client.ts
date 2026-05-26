@@ -84,7 +84,6 @@ import type {
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
-  CommandTemplate,
   CommandRun,
   CommandRunExecuteRequest,
   CommandRunListResponse,
