@@ -26,6 +26,36 @@ Turn coding agents into real teammates — assign tasks, track progress, compoun
 
 </div>
 
+## CommandDeck local preview
+
+For CommandDeck fork development, prefer the source-built Docker Compose path:
+
+```bash
+cp .env.example .env
+pnpm install
+pnpm run doctor
+docker compose -f compose.yml -f compose.dev.yml up -d --build
+docker compose -f compose.yml ps
+```
+
+Preview URLs:
+
+- Web: http://localhost:3000
+- API: http://localhost:8080
+- Health: http://localhost:8080/health
+
+On Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+pnpm install
+pnpm run doctor:ps
+docker compose -f compose.yml -f compose.dev.yml up -d --build
+docker compose -f compose.yml ps
+```
+
+Do not commit `.env`. Change `JWT_SECRET` before any shared or production deployment.
+
 ## What is Multica?
 
 Multica turns coding agents into real teammates. Assign issues to an agent like you'd assign to a colleague — they'll pick up the work, write code, report blockers, and update statuses autonomously.
