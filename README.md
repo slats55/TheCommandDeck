@@ -54,6 +54,12 @@ docker compose -f compose.yml -f compose.dev.yml up -d --build
 docker compose -f compose.yml ps
 ```
 
+If `pnpm run doctor:ps` fails because `pwsh` is not installed, run the doctor script with Windows PowerShell instead:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/doctor.ps1
+```
+
 Do not commit `.env`. Change `JWT_SECRET` before any shared or production deployment.
 
 ## What is Multica?
