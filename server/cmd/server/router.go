@@ -473,6 +473,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Command Runner
 			r.Route("/api/commandrunner", func(r chi.Router) {
 				r.Get("/templates", h.HandleCommandRunnerTemplates)
+				r.Get("/previews", h.HandleCommandDeckPreviews)
 				r.Post("/run", h.HandleCommandRunnerRun)
 				r.Get("/run/{runId}", h.HandleCommandRunnerGet)
 				r.Get("/runs", h.HandleCommandRunnerList)

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core";
-import type { CommandTemplate, CommandRun } from "@multica/core/types";
+import type { CommandTemplate, CommandRun, PreviewRegistryEntry } from "@multica/core/types";
 
 export default function CommandDeckPage() {
   const wsId = useWorkspaceId();
@@ -42,6 +42,15 @@ export default function CommandDeckPage() {
     refetchInterval: 5000, // Poll every 5 seconds for pending runs
   });
 
+  const {
+    data: previewsData,
+    isLoading: previewsLoading,
+  } = useQuery({
+    queryKey: ["commanddeck", "previews", wsId],
+    queryFn: () => api.listPreviewRegistry(),
+    refetchInterval: 15000,
+  });
+
   // Execute command mutation
   const runMutation = useMutation({
     mutationFn: () =>
@@ -61,6 +70,7 @@ export default function CommandDeckPage() {
   const templates: CommandTemplate[] = templatesData?.templates ?? [];
   const runs: CommandRun[] = runsData?.command_runs ?? [];
   const runtimes = runtimesData ?? [];
+  const previews: PreviewRegistryEntry[] = previewsData?.previews ?? [];
 
   const handleRun = () => {
     if (!selectedRuntimeId) {
@@ -93,6 +103,22 @@ export default function CommandDeckPage() {
     }
   };
 
+  const previewHealthLabel = (status: PreviewRegistryEntry["health_status"]): string => {
+    switch (status) {
+      case "healthy": return "Healthy";
+      case "unhealthy": return "Unhealthy";
+      default: return "Unknown";
+    }
+  };
+
+  const previewHealthColor = (status: PreviewRegistryEntry["health_status"]): string => {
+    switch (status) {
+      case "healthy": return "text-green-600";
+      case "unhealthy": return "text-red-600";
+      default: return "text-amber-600";
+    }
+  };
+
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       <div>
@@ -108,6 +134,90 @@ export default function CommandDeckPage() {
         (git status, git branch, git rev-parse, git diff).
         Raw command input is not supported. All commands execute within
         workspace boundaries with runtime identity preserved.
+      </div>
+
+      {/* Preview Registry */}
+      <div className="rounded-lg border bg-card p-6 space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-medium">Preview Registry</h2>
+          {previewsData?.last_checked_at && (
+            <span className="text-xs text-muted-foreground">
+              Checked {new Date(previewsData.last_checked_at).toLocaleTimeString()}
+            </span>
+          )}
+        </div>
+
+        {previewsLoading ? (
+          <p className="text-sm text-muted-foreground">Checking previews...</p>
+        ) : previews.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No previews are registered for this workspace.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {previews.map((preview) => (
+              <div key={preview.id} className="rounded-md border p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <a
+                      href={preview.preview_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="break-all font-medium text-primary hover:underline"
+                    >
+                      {preview.preview_url}
+                    </a>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Workspace: {preview.workspace_name}
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-sm">
+                    <span className={previewHealthColor(preview.health_status)}>
+                      {previewHealthLabel(preview.health_status)}
+                    </span>
+                    {preview.health_status_code != null && (
+                      <span className="ml-2 text-muted-foreground">
+                        HTTP {preview.health_status_code}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                  <div>
+                    <dt className="text-xs uppercase text-muted-foreground">Port</dt>
+                    <dd className="font-mono">{preview.port || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs uppercase text-muted-foreground">Runtime</dt>
+                    <dd>
+                      {preview.runtime_name ?? preview.runtime_id ?? "No runtime registered"}
+                      {preview.runtime_status && (
+                        <span className="ml-2 text-muted-foreground">
+                          ({preview.runtime_status})
+                        </span>
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs uppercase text-muted-foreground">Machine</dt>
+                    <dd className="break-all">{preview.machine_identity ?? "-"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs uppercase text-muted-foreground">Command</dt>
+                    <dd>{preview.command ?? "Not command-started"}</dd>
+                  </div>
+                </dl>
+
+                {preview.health_error && (
+                  <p className="mt-3 break-all text-xs text-red-600">
+                    {preview.health_error}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Command Runner Panel */}

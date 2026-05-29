@@ -88,6 +88,7 @@ import type {
   CommandRunExecuteRequest,
   CommandRunListResponse,
   CommandTemplatesResponse,
+  PreviewRegistryResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -1357,5 +1358,9 @@ export class ApiClient {
 
   async listCommandRuns(): Promise<CommandRunListResponse> {
     return this.fetch("/api/commandrunner/runs");
+  }
+
+  async listPreviewRegistry(): Promise<PreviewRegistryResponse> {
+    return this.fetch("/api/commandrunner/previews");
   }
 }

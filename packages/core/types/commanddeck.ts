@@ -37,3 +37,32 @@ export interface CommandRunListResponse {
 export interface CommandTemplatesResponse {
   templates: CommandTemplate[];
 }
+
+export type PreviewHealthStatus = "healthy" | "unhealthy" | "unknown";
+
+export interface PreviewRegistryEntry {
+  id: string;
+  workspace_id: string;
+  workspace_name: string;
+  workspace_slug: string;
+  project_id?: string | null;
+  project_name?: string | null;
+  runtime_id?: string | null;
+  runtime_name?: string | null;
+  runtime_status?: string | null;
+  machine_identity?: string | null;
+  preview_url: string;
+  port: number;
+  health_status: PreviewHealthStatus;
+  health_status_code?: number | null;
+  health_error?: string | null;
+  last_checked_at: string;
+  command_run_id?: string | null;
+  command?: string | null;
+  source: string;
+}
+
+export interface PreviewRegistryResponse {
+  previews: PreviewRegistryEntry[];
+  last_checked_at: string;
+}
