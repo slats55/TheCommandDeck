@@ -71,6 +71,10 @@ func (c *client) markSeen(eventID string) bool {
 // the ack and is logged at debug level.
 type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string) (*protocol.DaemonHeartbeatAckPayload, error)
 
+// CommandRunHandler processes a command_run:result frame sent from daemon to server.
+// It receives the runtimeID that the daemon authenticated with, and the payload.
+type CommandRunHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, payload json.RawMessage) error
+
 // Hub keeps daemon WebSocket connections indexed by runtime ID. Messages are
 // best-effort wakeup hints; the daemon still uses HTTP claim for correctness.
 type Hub struct {
@@ -80,8 +84,9 @@ type Hub struct {
 	clients   map[*client]bool
 	byRuntime map[string]map[*client]bool
 
-	hbMu        sync.RWMutex
-	onHeartbeat HeartbeatHandler
+	hbMu         sync.RWMutex
+	onHeartbeat  HeartbeatHandler
+	onCommandRun CommandRunHandler
 }
 
 func NewHub() *Hub {
@@ -117,6 +122,23 @@ func (h *Hub) heartbeatHandler() HeartbeatHandler {
 	h.hbMu.RLock()
 	defer h.hbMu.RUnlock()
 	return h.onHeartbeat
+}
+
+// SetCommandRunHandler installs the callback used for command_run:result frames
+// sent from daemon to server over the WebSocket connection.
+func (h *Hub) SetCommandRunHandler(fn CommandRunHandler) {
+	if h == nil {
+		return
+	}
+	h.hbMu.Lock()
+	h.onCommandRun = fn
+	h.hbMu.Unlock()
+}
+
+func (h *Hub) commandRunHandler() CommandRunHandler {
+	h.hbMu.RLock()
+	defer h.hbMu.RUnlock()
+	return h.onCommandRun
 }
 
 func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request, identity ClientIdentity) {
@@ -188,21 +210,37 @@ func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string)
 		M.WakeupDeliveredMiss.Add(1)
 		return
 	}
-	if msg.Type != protocol.EventDaemonTaskAvailable {
+
+	runtimeID, ok := runtimeIDFromDaemonRuntimeFrame(msg)
+	if !ok {
+		slog.Debug("daemon websocket relay: unsupported or invalid frame", "type", msg.Type, "scope_id", scopeID, "event_id", eventID)
 		M.WakeupDeliveredMiss.Add(1)
 		return
 	}
-	var payload protocol.TaskAvailablePayload
-	if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" {
-		slog.Debug("daemon websocket relay: invalid task_available payload", "error", err, "scope_id", scopeID, "event_id", eventID)
-		M.WakeupDeliveredMiss.Add(1)
-		return
-	}
-	delivered, deduped := h.notifyFrame(payload.RuntimeID, frame, eventID)
+	delivered, deduped := h.notifyFrame(runtimeID, frame, eventID)
 	if delivered {
 		M.WakeupDeliveredHit.Add(1)
 	} else if !deduped {
 		M.WakeupDeliveredMiss.Add(1)
+	}
+}
+
+func runtimeIDFromDaemonRuntimeFrame(msg protocol.Message) (string, bool) {
+	switch msg.Type {
+	case protocol.EventDaemonTaskAvailable:
+		var payload protocol.TaskAvailablePayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" {
+			return "", false
+		}
+		return payload.RuntimeID, true
+	case protocol.CommandRunExecute:
+		var payload protocol.CommandRunExecutePayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" {
+			return "", false
+		}
+		return payload.RuntimeID, true
+	default:
+		return "", false
 	}
 }
 
@@ -348,6 +386,8 @@ func (c *client) handleFrame(raw []byte) {
 	switch msg.Type {
 	case protocol.EventDaemonHeartbeat:
 		c.handleHeartbeatFrame(msg.Payload)
+	case protocol.CommandRunResult:
+		c.handleCommandRunFrame(msg.Payload)
 	default:
 		// Unknown app messages are intentionally ignored for forward
 		// compatibility with future daemon → server message types.
@@ -416,6 +456,37 @@ func (c *client) handleHeartbeatFrame(raw json.RawMessage) {
 		slog.Debug("daemon websocket heartbeat ack dropped: send buffer full",
 			"daemon_id", c.identity.DaemonID,
 			"runtime_id", payload.RuntimeID)
+	}
+}
+
+// handleCommandRunFrame processes an inbound command_run:result from the daemon,
+// invokes the hub's handler, and logs any error. No response is sent back to the daemon.
+func (c *client) handleCommandRunFrame(raw json.RawMessage) {
+	handler := c.hub.commandRunHandler()
+	if handler == nil {
+		slog.Debug("daemon websocket command_run:result handler not set", "daemon_id", c.identity.DaemonID)
+		return
+	}
+
+	// Extract runtimeID from the payload to verify the client is watching it.
+	var resultPayload struct {
+		CommandRunID string `json:"command_run_id"`
+	}
+	if err := json.Unmarshal(raw, &resultPayload); err != nil {
+		slog.Debug("command_run:result invalid payload", "error", err, "daemon_id", c.identity.DaemonID)
+		return
+	}
+	if resultPayload.CommandRunID == "" {
+		slog.Debug("command_run:result missing command_run_id", "daemon_id", c.identity.DaemonID)
+		return
+	}
+
+	err := handler(context.Background(), c.identity, "", raw)
+	if err != nil {
+		slog.Warn("daemon websocket command_run:result handler failed",
+			"error", err,
+			"daemon_id", c.identity.DaemonID,
+			"command_run_id", resultPayload.CommandRunID)
 	}
 }
 
