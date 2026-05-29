@@ -13,6 +13,7 @@ export default defineConfig({
     globals: true,
     include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.mjs"],
     environment: "jsdom",
+    environmentMatchGlobs: [["scripts/**/*.test.mjs", "node"]],
     setupFiles: ["./test/setup.ts"],
     passWithNoTests: true,
   },
