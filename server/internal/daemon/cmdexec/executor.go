@@ -22,9 +22,9 @@ const (
 
 // Executor runs approved commands with bounded working directories.
 type Executor struct {
-	// allowedCommands maps command name (e.g. "git") to its approved sub-commands.
-	// Only entries in this map are permitted. Sub-command list is exact match.
-	allowedCommands map[string]map[string]bool
+	// allowedCommands contains exact argv forms. Arguments are part of the key so
+	// approved subcommands cannot accept unapproved flags.
+	allowedCommands map[string]bool
 
 	// workspacesRoot is the base directory for all workspace worktrees.
 	// Used to validate working_directory boundaries.
@@ -34,14 +34,12 @@ type Executor struct {
 // NewExecutor creates a new command executor.
 // workspacesRoot is the daemon's workspaces root (e.g. ~/multica_workspaces).
 func NewExecutor(workspacesRoot string) *Executor {
-	// Slice 1: only "git status", "git branch", "git rev-parse", and "git diff" are allowed.
-	allowed := map[string]map[string]bool{
-		"git": {
-			"status":     true,
-			"branch":     true,
-			"rev-parse":  true,
-			"diff":       true,
-		},
+	// Slice 1: only the four seeded built-in templates are allowed.
+	allowed := map[string]bool{
+		commandKey([]string{"git", "status"}):                   true,
+		commandKey([]string{"git", "branch", "--show-current"}): true,
+		commandKey([]string{"git", "rev-parse", "HEAD"}):        true,
+		commandKey([]string{"git", "diff", "--stat"}):           true,
 	}
 	return &Executor{
 		allowedCommands: allowed,
@@ -51,12 +49,12 @@ func NewExecutor(workspacesRoot string) *Executor {
 
 // Result holds the outcome of a command execution.
 type Result struct {
-	Status      string // "completed", "failed", "timeout"
-	ExitCode    int
-	Stdout      string
-	Stderr      string
-	DurationMs  int
-	WorkingDir  string
+	Status     string // "completed", "failed", "timeout"
+	ExitCode   int
+	Stdout     string
+	Stderr     string
+	DurationMs int
+	WorkingDir string
 }
 
 // Execute runs the given command in the specified working directory,
@@ -155,20 +153,17 @@ func (e *Executor) Execute(ctx context.Context, command string, workingDir strin
 	}
 }
 
-// isAllowed checks if the argv matches an entry in the allowlist.
-// Example: ["git", "status"] is allowed; ["git", "push"] is not.
+// isAllowed checks if the argv exactly matches an entry in the allowlist.
+// Example: ["git", "status"] is allowed; ["git", "diff", "--name-only"] is not.
 func (e *Executor) isAllowed(argv []string) bool {
-	if len(argv) < 2 {
+	if len(argv) == 0 {
 		return false
 	}
-	binary := argv[0]
-	subCmd := argv[1]
+	return e.allowedCommands[commandKey(argv)]
+}
 
-	subCommands, ok := e.allowedCommands[binary]
-	if !ok {
-		return false
-	}
-	return subCommands[subCmd]
+func commandKey(argv []string) string {
+	return strings.Join(argv, "\x00")
 }
 
 // isWithinBoundary returns true if workingDir is within the workspacesRoot

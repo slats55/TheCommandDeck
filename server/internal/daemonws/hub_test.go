@@ -141,6 +141,53 @@ func TestRelayNotifierDedupsLocalRedisLoopback(t *testing.T) {
 	}
 }
 
+func TestDeliverDaemonRuntimeRelaysCommandRunExecute(t *testing.T) {
+	M.Reset()
+	defer M.Reset()
+
+	hub := NewHub()
+	client := attachDaemonTestClient(hub, "runtime-1")
+
+	frame, err := json.Marshal(protocol.Message{
+		Type: protocol.CommandRunExecute,
+		Payload: mustMarshalRaw(protocol.CommandRunExecutePayload{
+			CommandRunID: "run-1",
+			RuntimeID:    "runtime-1",
+			Command:      "git status",
+			WorkingDir:   "/tmp/repo",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("marshal command run frame: %v", err)
+	}
+
+	hub.DeliverDaemonRuntime("runtime-1", frame, "")
+
+	select {
+	case got := <-client.send:
+		var msg protocol.Message
+		if err := json.Unmarshal(got, &msg); err != nil {
+			t.Fatalf("unmarshal delivered frame: %v", err)
+		}
+		if msg.Type != protocol.CommandRunExecute {
+			t.Fatalf("message type = %q, want %q", msg.Type, protocol.CommandRunExecute)
+		}
+		var payload protocol.CommandRunExecutePayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+			t.Fatalf("unmarshal command run payload: %v", err)
+		}
+		if payload.CommandRunID != "run-1" || payload.RuntimeID != "runtime-1" || payload.Command != "git status" {
+			t.Fatalf("payload = %+v, want command run execute payload", payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected command_run:execute frame to be delivered")
+	}
+
+	if M.WakeupDeliveredHit.Load() != 1 {
+		t.Fatalf("delivered hit metric = %d, want 1", M.WakeupDeliveredHit.Load())
+	}
+}
+
 // TestHeartbeatRoundTrip pins the WS heartbeat contract: a daemon:heartbeat
 // frame invokes the registered HeartbeatHandler with the runtime ID, and the
 // hub serializes the returned ack as a daemon:heartbeat_ack on the wire.

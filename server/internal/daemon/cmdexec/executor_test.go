@@ -2,6 +2,8 @@ package cmdexec
 
 import (
 	"context"
+	"os"
+	execCmd "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -184,11 +186,17 @@ func TestExecutorIsAllowed(t *testing.T) {
 	}{
 		// ── Approved commands ────────────────────────────────────────────────────
 		{argv: []string{"git", "status"}, expected: true},
-		{argv: []string{"git", "branch"}, expected: true},
-		{argv: []string{"git", "rev-parse"}, expected: true},
-		{argv: []string{"git", "diff"}, expected: true},
+		{argv: []string{"git", "branch", "--show-current"}, expected: true},
+		{argv: []string{"git", "rev-parse", "HEAD"}, expected: true},
+		{argv: []string{"git", "diff", "--stat"}, expected: true},
 
 		// ── Rejection: non-approved git subcommands ───────────────────────────────
+		{argv: []string{"git", "branch"}, expected: false},
+		{argv: []string{"git", "branch", "-a"}, expected: false},
+		{argv: []string{"git", "rev-parse"}, expected: false},
+		{argv: []string{"git", "rev-parse", "--show-toplevel"}, expected: false},
+		{argv: []string{"git", "diff"}, expected: false},
+		{argv: []string{"git", "diff", "--name-only"}, expected: false},
 		{argv: []string{"git", "push"}, expected: false},
 		{argv: []string{"git", "commit"}, expected: false},
 		{argv: []string{"git", "stash"}, expected: false},
@@ -206,8 +214,8 @@ func TestExecutorIsAllowed(t *testing.T) {
 
 		// ── Rejection: edge cases ─────────────────────────────────────────────────
 		{argv: []string{}, expected: false},
-		{argv: []string{"git"}, expected: false},                  // missing subcommand
-		{argv: []string{"bash", "-c", "ls"}, expected: false},    // bash not in allowlist
+		{argv: []string{"git"}, expected: false},              // missing subcommand
+		{argv: []string{"bash", "-c", "ls"}, expected: false}, // bash not in allowlist
 	}
 
 	for _, tc := range tests {
@@ -276,6 +284,51 @@ func TestExecutorIsWithinBoundary(t *testing.T) {
 	}
 }
 
+func TestExecuteApprovedBuiltins(t *testing.T) {
+	baseDir := t.TempDir()
+	repoDir := filepath.Join(baseDir, "repo")
+	if err := os.Mkdir(repoDir, 0755); err != nil {
+		t.Fatalf("failed to create repo dir: %v", err)
+	}
+	initGitRepo(t, repoDir)
+	if err := os.WriteFile(filepath.Join(repoDir, "changed.txt"), []byte("changed\n"), 0644); err != nil {
+		t.Fatalf("failed to create changed file: %v", err)
+	}
+
+	exec := NewExecutor(baseDir)
+	tests := []struct {
+		name          string
+		command       string
+		wantStdoutSub string
+	}{
+		{name: "git status", command: "git status", wantStdoutSub: "changed.txt"},
+		{name: "git branch", command: "git branch --show-current", wantStdoutSub: "main"},
+		{name: "git rev-parse", command: "git rev-parse HEAD"},
+		{name: "git diff stat", command: "git diff --stat"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+
+			result := exec.Execute(ctx, tc.command, repoDir)
+			if result.Status != "completed" {
+				t.Fatalf("Execute(%q): status=%q stderr=%q", tc.command, result.Status, result.Stderr)
+			}
+			if result.ExitCode != 0 {
+				t.Fatalf("Execute(%q): exit code=%d, want 0", tc.command, result.ExitCode)
+			}
+			if result.WorkingDir != repoDir {
+				t.Fatalf("Execute(%q): working dir=%q, want %q", tc.command, result.WorkingDir, repoDir)
+			}
+			if tc.wantStdoutSub != "" && !strings.Contains(result.Stdout, tc.wantStdoutSub) {
+				t.Fatalf("Execute(%q): stdout=%q, want substring %q", tc.command, result.Stdout, tc.wantStdoutSub)
+			}
+		})
+	}
+}
+
 func TestExecuteRejectedCases(t *testing.T) {
 	baseDir := t.TempDir()
 	exec := NewExecutor(baseDir)
@@ -289,23 +342,44 @@ func TestExecuteRejectedCases(t *testing.T) {
 	}{
 		{
 			name:          "shell metacharacters rejected at parse stage",
-			command:      "git status | cat",
-			workingDir:   baseDir,
-			wantStatus:   "failed",
+			command:       "git status | cat",
+			workingDir:    baseDir,
+			wantStatus:    "failed",
 			wantStderrSub: "disallowed characters",
 		},
 		{
 			name:          "too many tokens rejected",
-			command:      "git status --short --verbose",
-			workingDir:   baseDir,
-			wantStatus:   "failed",
+			command:       "git status --short --verbose",
+			workingDir:    baseDir,
+			wantStatus:    "failed",
 			wantStderrSub: "too many tokens",
 		},
 		{
 			name:          "non-git binary rejected at allowlist",
-			command:      "ls -la",
-			workingDir:   baseDir,
-			wantStatus:   "failed",
+			command:       "ls -la",
+			workingDir:    baseDir,
+			wantStatus:    "failed",
+			wantStderrSub: "command not in allowlist",
+		},
+		{
+			name:          "unapproved git diff arg rejected",
+			command:       "git diff --name-only",
+			workingDir:    baseDir,
+			wantStatus:    "failed",
+			wantStderrSub: "command not in allowlist",
+		},
+		{
+			name:          "unapproved git branch arg rejected",
+			command:       "git branch -a",
+			workingDir:    baseDir,
+			wantStatus:    "failed",
+			wantStderrSub: "command not in allowlist",
+		},
+		{
+			name:          "unapproved git rev-parse arg rejected",
+			command:       "git rev-parse --show-toplevel",
+			workingDir:    baseDir,
+			wantStatus:    "failed",
 			wantStderrSub: "command not in allowlist",
 		},
 	}
@@ -359,6 +433,25 @@ func TestExecuteNonexistentWorkingDir(t *testing.T) {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+func TestExecuteExitCodeAndStderrRecorded(t *testing.T) {
+	baseDir := t.TempDir()
+	exec := NewExecutor(baseDir)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	result := exec.Execute(ctx, "git status", baseDir)
+	if result.Status != "failed" {
+		t.Fatalf("Execute in non-git dir: status=%q, want failed", result.Status)
+	}
+	if result.ExitCode == 0 {
+		t.Fatalf("Execute in non-git dir: exit code=%d, want non-zero", result.ExitCode)
+	}
+	if result.Stderr == "" {
+		t.Fatal("Execute in non-git dir: stderr is empty, want real git failure output")
+	}
+}
+
 func equalSlice(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -369,4 +462,28 @@ func equalSlice(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := execCmd.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = os.Environ()
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, string(output))
+		}
+	}
+
+	runGit("init", "-b", "main")
+	runGit("config", "user.email", "commanddeck-test@example.invalid")
+	runGit("config", "user.name", "CommandDeck Test")
+
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# test\n"), 0644); err != nil {
+		t.Fatalf("failed to write README.md: %v", err)
+	}
+	runGit("add", "README.md")
+	runGit("commit", "-m", "initial")
 }

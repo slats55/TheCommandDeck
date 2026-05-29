@@ -84,9 +84,9 @@ type Hub struct {
 	clients   map[*client]bool
 	byRuntime map[string]map[*client]bool
 
-	hbMu          sync.RWMutex
-	onHeartbeat   HeartbeatHandler
-	onCommandRun  CommandRunHandler
+	hbMu         sync.RWMutex
+	onHeartbeat  HeartbeatHandler
+	onCommandRun CommandRunHandler
 }
 
 func NewHub() *Hub {
@@ -210,21 +210,37 @@ func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string)
 		M.WakeupDeliveredMiss.Add(1)
 		return
 	}
-	if msg.Type != protocol.EventDaemonTaskAvailable {
+
+	runtimeID, ok := runtimeIDFromDaemonRuntimeFrame(msg)
+	if !ok {
+		slog.Debug("daemon websocket relay: unsupported or invalid frame", "type", msg.Type, "scope_id", scopeID, "event_id", eventID)
 		M.WakeupDeliveredMiss.Add(1)
 		return
 	}
-	var payload protocol.TaskAvailablePayload
-	if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" {
-		slog.Debug("daemon websocket relay: invalid task_available payload", "error", err, "scope_id", scopeID, "event_id", eventID)
-		M.WakeupDeliveredMiss.Add(1)
-		return
-	}
-	delivered, deduped := h.notifyFrame(payload.RuntimeID, frame, eventID)
+	delivered, deduped := h.notifyFrame(runtimeID, frame, eventID)
 	if delivered {
 		M.WakeupDeliveredHit.Add(1)
 	} else if !deduped {
 		M.WakeupDeliveredMiss.Add(1)
+	}
+}
+
+func runtimeIDFromDaemonRuntimeFrame(msg protocol.Message) (string, bool) {
+	switch msg.Type {
+	case protocol.EventDaemonTaskAvailable:
+		var payload protocol.TaskAvailablePayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" {
+			return "", false
+		}
+		return payload.RuntimeID, true
+	case protocol.CommandRunExecute:
+		var payload protocol.CommandRunExecutePayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" {
+			return "", false
+		}
+		return payload.RuntimeID, true
+	default:
+		return "", false
 	}
 }
 
