@@ -91,3 +91,10 @@ export type {
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
 } from "./autopilot";
+export type {
+  CommandTemplate,
+  CommandRun,
+  CommandRunExecuteRequest,
+  CommandRunListResponse,
+  CommandTemplatesResponse,
+} from "./commanddeck";

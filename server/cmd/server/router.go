@@ -140,6 +140,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Wire WS heartbeat after stores are finalized so the WS path uses the
 	// same (possibly Redis-backed) stores as the HTTP path.
 	daemonHub.SetHeartbeatHandler(h.HandleDaemonWSHeartbeat)
+	daemonHub.SetCommandRunHandler(h.HandleDaemonCommandRunWS)
 	health := newServerHealth(pool)
 
 	r := chi.NewRouter()
@@ -220,7 +221,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
-		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache))
+		strictDaemon := os.Getenv("DAEMON_AUTH_STRICT") == "true"
+		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache, strictDaemon))
 
 		r.Post("/register", h.DaemonRegister)
 		r.Post("/deregister", h.DaemonDeregister)
@@ -466,6 +468,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/usage", func(r chi.Router) {
 				r.Get("/daily", h.GetWorkspaceUsageByDay)
 				r.Get("/summary", h.GetWorkspaceUsageSummary)
+			})
+
+			// Command Runner
+			r.Route("/api/commandrunner", func(r chi.Router) {
+				r.Get("/templates", h.HandleCommandRunnerTemplates)
+				r.Post("/run", h.HandleCommandRunnerRun)
+				r.Get("/run/{runId}", h.HandleCommandRunnerGet)
+				r.Get("/runs", h.HandleCommandRunnerList)
 			})
 
 			// Runtimes
