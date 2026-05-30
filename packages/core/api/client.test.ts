@@ -164,6 +164,25 @@ describe("ApiClient", () => {
     expect(init?.body).toBeUndefined();
   });
 
+  it("uses a fixed trusted sync endpoint for preview registry refresh", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ previews: [], last_checked_at: "2026-05-29T00:00:00Z" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.syncSelfHostedPreviewRegistry();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://api.example.test/api/commandrunner/previews/self-hosted/sync");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBeUndefined();
+  });
+
   it("falls back to an empty preview registry response for malformed data", async () => {
     vi.stubGlobal(
       "fetch",

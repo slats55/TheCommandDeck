@@ -105,7 +105,7 @@ INSERT INTO preview_registry (
 )
 ON CONFLICT (workspace_id, source, preview_url)
 DO UPDATE SET
-    runtime_id = EXCLUDED.runtime_id,
+    runtime_id = COALESCE(EXCLUDED.runtime_id, preview_registry.runtime_id),
     name = EXCLUDED.name,
     port = EXCLUDED.port,
     status = EXCLUDED.status,

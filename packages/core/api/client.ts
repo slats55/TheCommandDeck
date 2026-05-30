@@ -1371,4 +1371,16 @@ export class ApiClient {
       { endpoint: "listPreviewRegistry" },
     );
   }
+
+  async syncSelfHostedPreviewRegistry(): Promise<PreviewRegistryResponse> {
+    const response = await this.fetch<unknown>("/api/commandrunner/previews/self-hosted/sync", {
+      method: "POST",
+    });
+    return parseWithFallback<PreviewRegistryResponse>(
+      response,
+      PreviewRegistryResponseSchema,
+      EMPTY_PREVIEW_REGISTRY_RESPONSE,
+      { endpoint: "syncSelfHostedPreviewRegistry" },
+    );
+  }
 }

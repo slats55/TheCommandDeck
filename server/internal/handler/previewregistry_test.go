@@ -134,7 +134,29 @@ func TestPreviewHealthClientHasBoundedTimeout(t *testing.T) {
 	}
 }
 
-func TestHandleCommandDeckPreviewsPersistsSelfHostedRecord(t *testing.T) {
+func TestHandleCommandDeckPreviewsIsReadOnly(t *testing.T) {
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, `DELETE FROM preview_registry WHERE workspace_id = $1`, testWorkspaceID); err != nil {
+		t.Fatalf("cleanup preview registry: %v", err)
+	}
+
+	got := requestPreviewRegistry(t)
+	if len(got.Previews) != 0 {
+		t.Fatalf("GET previews length = %d, want 0 for read-only listing", len(got.Previews))
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM preview_registry WHERE workspace_id = $1
+	`, testWorkspaceID).Scan(&count); err != nil {
+		t.Fatalf("count preview records: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("preview_registry count = %d, want 0", count)
+	}
+}
+
+func TestHandleCommandDeckPreviewSelfHostedSyncPersistsRecord(t *testing.T) {
 	previewServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -147,7 +169,7 @@ func TestHandleCommandDeckPreviewsPersistsSelfHostedRecord(t *testing.T) {
 		t.Fatalf("cleanup preview registry: %v", err)
 	}
 
-	first := requestPreviewRegistry(t)
+	first := requestPreviewRegistrySync(t)
 	if len(first.Previews) != 1 {
 		t.Fatalf("first response previews length = %d, want 1", len(first.Previews))
 	}
@@ -169,7 +191,7 @@ func TestHandleCommandDeckPreviewsPersistsSelfHostedRecord(t *testing.T) {
 		t.Fatalf("registered/updated timestamps were not returned: %#v", entry)
 	}
 
-	second := requestPreviewRegistry(t)
+	second := requestPreviewRegistrySync(t)
 	if len(second.Previews) != 1 {
 		t.Fatalf("second response previews length = %d, want 1", len(second.Previews))
 	}
@@ -190,6 +212,26 @@ func TestHandleCommandDeckPreviewsPersistsSelfHostedRecord(t *testing.T) {
 	}
 }
 
+func TestHandleCommandDeckPreviewSelfHostedSyncDoesNotAssignUnprovenRuntime(t *testing.T) {
+	previewServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer previewServer.Close()
+
+	t.Setenv("FRONTEND_ORIGIN", previewServer.URL)
+	resp := requestPreviewRegistrySync(t)
+	if len(resp.Previews) != 1 {
+		t.Fatalf("previews length = %d, want 1", len(resp.Previews))
+	}
+	entry := resp.Previews[0]
+	if entry.RuntimeID != nil {
+		t.Fatalf("RuntimeID = %v, want nil for unproven runtime provenance", *entry.RuntimeID)
+	}
+	if entry.MachineIdentity != nil {
+		t.Fatalf("MachineIdentity = %v, want nil for unproven runtime provenance", *entry.MachineIdentity)
+	}
+}
+
 func requestPreviewRegistry(t *testing.T) previewRegistryResponse {
 	t.Helper()
 
@@ -200,6 +242,25 @@ func requestPreviewRegistry(t *testing.T) previewRegistryResponse {
 	testHandler.HandleCommandDeckPreviews(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("HandleCommandDeckPreviews status = %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp previewRegistryResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return resp
+}
+
+func requestPreviewRegistrySync(t *testing.T) previewRegistryResponse {
+	t.Helper()
+
+	req := newRequest(http.MethodPost, "/api/commandrunner/previews/self-hosted/sync", nil)
+	req = withURLParam(req, "workspaceID", testWorkspaceID)
+	w := httptest.NewRecorder()
+
+	testHandler.HandleCommandDeckPreviewSelfHostedSync(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("HandleCommandDeckPreviewSelfHostedSync status = %d: %s", w.Code, w.Body.String())
 	}
 
 	var resp previewRegistryResponse

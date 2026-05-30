@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
@@ -9,6 +9,7 @@ const { apiMock } = vi.hoisted(() => ({
     listRuntimes: vi.fn(),
     listCommandRuns: vi.fn(),
     listPreviewRegistry: vi.fn(),
+    syncSelfHostedPreviewRegistry: vi.fn(),
     runCommand: vi.fn(),
   },
 }));
@@ -55,10 +56,10 @@ describe("CommandDeckPage Preview Registry", () => {
           workspace_id: "workspace-1",
           workspace_name: "Acme",
           workspace_slug: "acme",
-          runtime_id: "runtime-1",
-          runtime_name: "Work Machine",
-          runtime_status: "online",
-          machine_identity: "daemon-1",
+          runtime_id: null,
+          runtime_name: null,
+          runtime_status: null,
+          machine_identity: null,
           preview_url: "http://localhost:3000",
           port: 3000,
           health_status: "healthy",
@@ -79,7 +80,7 @@ describe("CommandDeckPage Preview Registry", () => {
     expect(await screen.findByText("http://localhost:3000")).toBeInTheDocument();
     expect(screen.getByText("Healthy")).toBeInTheDocument();
     expect(screen.getByText("HTTP 200")).toBeInTheDocument();
-    expect(screen.getByText("Work Machine")).toBeInTheDocument();
+    expect(screen.getByText("Unlinked (self-hosted preview)")).toBeInTheDocument();
     expect(screen.getByText("Last Successful Check")).toBeInTheDocument();
   });
 
@@ -128,6 +129,21 @@ describe("CommandDeckPage Preview Registry", () => {
     await waitFor(() => {
       expect(screen.queryByText(/10\.0\.0\.5/)).not.toBeInTheDocument();
       expect(screen.queryByText(/dial tcp/)).not.toBeInTheDocument();
+    });
+  });
+
+  it("refresh action calls only the trusted sync endpoint", async () => {
+    apiMock.syncSelfHostedPreviewRegistry.mockResolvedValue({
+      previews: [],
+      last_checked_at: "2026-05-29T00:00:00Z",
+    });
+
+    render(<CommandDeckPage />, { wrapper: createWrapper() });
+    const button = await screen.findByRole("button", { name: "Register/Refresh Preview" });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(apiMock.syncSelfHostedPreviewRegistry).toHaveBeenCalledTimes(1);
     });
   });
 });
