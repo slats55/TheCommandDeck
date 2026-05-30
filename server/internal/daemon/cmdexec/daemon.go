@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -39,8 +40,10 @@ type WebSocketHandler struct {
 	logger   *slog.Logger
 	mu       sync.Mutex
 	active   map[string]context.CancelFunc
-	canceled map[string]struct{}
+	canceled map[string]time.Time
 }
+
+const canceledRunRetention = 5 * time.Minute
 
 // NewWebSocketHandler creates a handler that sends result frames on the provided
 // channel and executes commands using the given workspaces root.
@@ -50,7 +53,7 @@ func NewWebSocketHandler(workspacesRoot string, sendChan chan []byte, logger *sl
 		send:     sendChan,
 		logger:   logger,
 		active:   make(map[string]context.CancelFunc),
-		canceled: make(map[string]struct{}),
+		canceled: make(map[string]time.Time),
 	}
 }
 
@@ -159,22 +162,32 @@ func (h *WebSocketHandler) clearActive(runID string) {
 func (h *WebSocketHandler) cancelRun(runID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.pruneCanceledLocked(time.Now())
 	if cancel, ok := h.active[runID]; ok {
-		h.canceled[runID] = struct{}{}
+		h.canceled[runID] = time.Now()
 		cancel()
 		return
 	}
-	h.canceled[runID] = struct{}{}
+	h.canceled[runID] = time.Now()
 }
 
 func (h *WebSocketHandler) consumeCanceled(runID string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.pruneCanceledLocked(time.Now())
 	if _, ok := h.canceled[runID]; !ok {
 		return false
 	}
 	delete(h.canceled, runID)
 	return true
+}
+
+func (h *WebSocketHandler) pruneCanceledLocked(now time.Time) {
+	for runID, cancelledAt := range h.canceled {
+		if now.Sub(cancelledAt) > canceledRunRetention {
+			delete(h.canceled, runID)
+		}
+	}
 }
 
 func mustMarshal(v any) json.RawMessage {

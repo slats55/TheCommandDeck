@@ -58,6 +58,39 @@ func TestWebSocketHandlerCancelActiveRunYieldsCancelled(t *testing.T) {
 	}
 }
 
+func TestWebSocketHandlerConsumeCanceledRemovesRunID(t *testing.T) {
+	send := make(chan []byte, 1)
+	h := NewWebSocketHandler(t.TempDir(), send, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h.cancelRun("run-3")
+	if !h.consumeCanceled("run-3") {
+		t.Fatal("expected canceled run ID to be consumed")
+	}
+	if h.consumeCanceled("run-3") {
+		t.Fatal("expected canceled run ID to be removed after consumption")
+	}
+}
+
+func TestWebSocketHandlerPruneCanceledDropsExpiredRunIDs(t *testing.T) {
+	send := make(chan []byte, 1)
+	h := NewWebSocketHandler(t.TempDir(), send, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	now := time.Now()
+
+	h.mu.Lock()
+	h.canceled["expired-run"] = now.Add(-(canceledRunRetention + time.Second))
+	h.canceled["fresh-run"] = now
+	h.pruneCanceledLocked(now)
+	_, hasExpired := h.canceled["expired-run"]
+	_, hasFresh := h.canceled["fresh-run"]
+	h.mu.Unlock()
+
+	if hasExpired {
+		t.Fatal("expected expired canceled run ID to be pruned")
+	}
+	if !hasFresh {
+		t.Fatal("expected fresh canceled run ID to remain")
+	}
+}
+
 func recvResult(t *testing.T, ch <-chan []byte) CommandRunResultPayload {
 	t.Helper()
 	select {
