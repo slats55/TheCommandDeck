@@ -273,8 +273,50 @@ describe("CommandDeckPage Preview Registry", () => {
     expect(await screen.findByText("http://localhost:3000")).toBeInTheDocument();
     expect(screen.getByText("Healthy")).toBeInTheDocument();
     expect(screen.getByText("HTTP 200")).toBeInTheDocument();
-    expect(screen.getByText("Unlinked (self-hosted preview)")).toBeInTheDocument();
+    expect(screen.getByText("Runtime provenance not yet established")).toBeInTheDocument();
     expect(screen.getByText("Last Successful Check")).toBeInTheDocument();
+  });
+
+  it("renders verified runtime provenance and offline runtime truth", async () => {
+    apiMock.listRuntimes.mockResolvedValueOnce([
+      {
+        id: "rt-offline-preview",
+        name: "Preview Runtime",
+        provider: "codex",
+        runtime_mode: "local",
+        status: "offline",
+        health_status: "offline",
+        last_seen_at: "2026-05-29T00:00:00Z",
+      },
+    ]);
+    apiMock.listPreviewRegistry.mockResolvedValueOnce({
+      previews: [
+        {
+          id: "preview-verified-runtime",
+          workspace_id: "workspace-1",
+          workspace_name: "Acme",
+          workspace_slug: "acme",
+          runtime_id: "rt-offline-preview",
+          runtime_name: "Preview Runtime",
+          runtime_status: "offline",
+          machine_identity: "daemon-1",
+          preview_url: "http://localhost:3000",
+          port: 3000,
+          health_status: "healthy",
+          health_status_code: 200,
+          last_checked_at: "2026-05-29T00:00:00Z",
+          last_success_at: "2026-05-29T00:00:00Z",
+          registered_at: "2026-05-28T00:00:00Z",
+          updated_at: "2026-05-29T00:00:00Z",
+          source: "self_hosted_stack",
+        },
+      ],
+      last_checked_at: "2026-05-29T00:00:00Z",
+    });
+
+    render(<CommandDeckPage />, { wrapper: createWrapper() });
+
+    expect(await screen.findByText("Reported by verified runtime (runtime offline)")).toBeInTheDocument();
   });
 
   it("renders structured truncation and cancellation evidence in run history", async () => {

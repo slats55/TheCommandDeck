@@ -232,6 +232,180 @@ func TestHandleCommandDeckPreviewSelfHostedSyncDoesNotAssignUnprovenRuntime(t *t
 	}
 }
 
+func TestReportRuntimePreview_AssignsTrustedRuntimeAndKeepsCommandRunUnlinked(t *testing.T) {
+	previewServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer previewServer.Close()
+
+	runtimeID, daemonID := createDaemonPreviewTestRuntime(t, "preview-report-daemon-1")
+
+	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/previews/report", map[string]any{
+		"preview_url": previewServer.URL,
+		"name":        "Runtime Reported Preview",
+	}, testWorkspaceID, daemonID)
+	req = withURLParam(req, "runtimeId", runtimeID)
+
+	w := httptest.NewRecorder()
+	testHandler.ReportRuntimePreview(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ReportRuntimePreview status = %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp previewRegistryResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Previews) != 1 {
+		t.Fatalf("previews length = %d, want 1", len(resp.Previews))
+	}
+	entry := resp.Previews[0]
+	if entry.RuntimeID == nil || *entry.RuntimeID != runtimeID {
+		t.Fatalf("RuntimeID = %v, want %s", entry.RuntimeID, runtimeID)
+	}
+	if entry.CommandRunID != nil {
+		t.Fatalf("CommandRunID = %v, want nil", *entry.CommandRunID)
+	}
+	if entry.MachineIdentity == nil || !strings.EqualFold(*entry.MachineIdentity, daemonID) {
+		t.Fatalf("MachineIdentity = %v, want %s", entry.MachineIdentity, daemonID)
+	}
+
+	var persistedRuntimeID *string
+	var persistedCommandRunID *string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT runtime_id::text, command_run_id::text
+		FROM preview_registry
+		WHERE workspace_id = $1 AND preview_url = $2
+	`, testWorkspaceID, previewServer.URL).Scan(&persistedRuntimeID, &persistedCommandRunID); err != nil {
+		t.Fatalf("load persisted preview: %v", err)
+	}
+	if persistedRuntimeID == nil || *persistedRuntimeID != runtimeID {
+		t.Fatalf("persisted runtime_id = %v, want %s", persistedRuntimeID, runtimeID)
+	}
+	if persistedCommandRunID != nil {
+		t.Fatalf("persisted command_run_id = %v, want nil", *persistedCommandRunID)
+	}
+}
+
+func TestReportRuntimePreview_RejectsSpoofedRuntimeIDPayload(t *testing.T) {
+	previewServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer previewServer.Close()
+
+	runtimeID, daemonID := createDaemonPreviewTestRuntime(t, "preview-report-daemon-2")
+	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/previews/report", map[string]any{
+		"preview_url": previewServer.URL,
+		"runtime_id":  "00000000-0000-0000-0000-000000000999",
+	}, testWorkspaceID, daemonID)
+	req = withURLParam(req, "runtimeId", runtimeID)
+
+	w := httptest.NewRecorder()
+	testHandler.ReportRuntimePreview(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("ReportRuntimePreview status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestReportRuntimePreview_RejectsDaemonRuntimeMismatch(t *testing.T) {
+	previewServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer previewServer.Close()
+
+	runtimeID, _ := createDaemonPreviewTestRuntime(t, "preview-report-daemon-3")
+	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/previews/report", map[string]any{
+		"preview_url": previewServer.URL,
+	}, testWorkspaceID, "different-daemon-id")
+	req = withURLParam(req, "runtimeId", runtimeID)
+
+	w := httptest.NewRecorder()
+	testHandler.ReportRuntimePreview(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("ReportRuntimePreview status = %d, want 404: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestReportRuntimePreview_RejectsCrossWorkspaceDaemon(t *testing.T) {
+	previewServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer previewServer.Close()
+
+	runtimeID, daemonID := createDaemonPreviewTestRuntime(t, "preview-report-daemon-4")
+	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/previews/report", map[string]any{
+		"preview_url": previewServer.URL,
+	}, "00000000-0000-0000-0000-000000000000", daemonID)
+	req = withURLParam(req, "runtimeId", runtimeID)
+
+	w := httptest.NewRecorder()
+	testHandler.ReportRuntimePreview(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("ReportRuntimePreview status = %d, want 404: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestReportRuntimePreview_RequiresDaemonTokenAuthPath(t *testing.T) {
+	previewServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer previewServer.Close()
+
+	runtimeID, _ := createDaemonPreviewTestRuntime(t, "preview-report-daemon-5")
+	req := newRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/previews/report", map[string]any{
+		"preview_url": previewServer.URL,
+	})
+	req = withURLParam(req, "runtimeId", runtimeID)
+
+	w := httptest.NewRecorder()
+	testHandler.ReportRuntimePreview(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("ReportRuntimePreview status = %d, want 403: %s", w.Code, w.Body.String())
+	}
+}
+
+func createDaemonPreviewTestRuntime(t *testing.T, daemonID string) (runtimeID string, normalizedDaemonID string) {
+	t.Helper()
+
+	normalizedDaemonID = strings.TrimSpace(daemonID)
+	if normalizedDaemonID == "" {
+		normalizedDaemonID = "preview-runtime-daemon"
+	}
+
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_runtime (
+			workspace_id,
+			daemon_id,
+			name,
+			runtime_mode,
+			provider,
+			status,
+			device_info,
+			metadata,
+			last_seen_at
+		)
+		VALUES ($1, $2, 'Preview Test Runtime', 'local', 'codex', 'online', 'Preview Test Machine', '{}'::jsonb, now())
+		RETURNING id
+	`, testWorkspaceID, normalizedDaemonID).Scan(&runtimeID); err != nil {
+		t.Fatalf("create preview test runtime: %v", err)
+	}
+
+	t.Cleanup(func() {
+		if _, err := testPool.Exec(context.Background(), `
+			DELETE FROM preview_registry WHERE runtime_id = $1
+		`, runtimeID); err != nil {
+			t.Fatalf("cleanup preview registry runtime rows: %v", err)
+		}
+		if _, err := testPool.Exec(context.Background(), `
+			DELETE FROM agent_runtime WHERE id = $1
+		`, runtimeID); err != nil {
+			t.Fatalf("cleanup preview test runtime: %v", err)
+		}
+	})
+
+	return runtimeID, normalizedDaemonID
+}
+
 func requestPreviewRegistry(t *testing.T) previewRegistryResponse {
 	t.Helper()
 

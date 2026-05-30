@@ -128,6 +128,7 @@ export default function CommandDeckPage() {
   const runtimes = runtimesData ?? [];
   const onlineRuntimes = runtimes.filter((rt) => rt.status === "online");
   const previews: PreviewRegistryEntry[] = previewsData?.previews ?? [];
+  const runtimesById = new Map(runtimes.map((runtime) => [runtime.id, runtime]));
 
   useWSEvent("command_run:updated", (payload) => {
     if (!isCommandRunUpdatedPayload(payload)) {
@@ -242,6 +243,24 @@ export default function CommandDeckPage() {
     }
   };
 
+  const previewRuntimeProvenanceLabel = (preview: PreviewRegistryEntry): string => {
+    if (!preview.runtime_id) {
+      return "Runtime provenance not yet established";
+    }
+    const runtime = runtimesById.get(preview.runtime_id);
+    const healthStatus = runtime?.health_status;
+    if (healthStatus === "offline") {
+      return "Reported by verified runtime (runtime offline)";
+    }
+    if (healthStatus === "stale") {
+      return "Reported by verified runtime (runtime stale)";
+    }
+    if (healthStatus === "online") {
+      return "Reported by verified runtime";
+    }
+    return "Reported by verified runtime (runtime status unknown)";
+  };
+
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       <div>
@@ -331,12 +350,8 @@ export default function CommandDeckPage() {
                   <div>
                     <dt className="text-xs uppercase text-muted-foreground">Runtime</dt>
                     <dd>
-                      {preview.runtime_name ?? preview.runtime_id ?? "Unlinked (self-hosted preview)"}
-                      {preview.runtime_status && (
-                        <span className="ml-2 text-muted-foreground">
-                          ({preview.runtime_status})
-                        </span>
-                      )}
+                      <div>{preview.runtime_name ?? preview.runtime_id ?? "-"}</div>
+                      <div className="text-xs text-muted-foreground">{previewRuntimeProvenanceLabel(preview)}</div>
                     </dd>
                   </div>
                   <div>
