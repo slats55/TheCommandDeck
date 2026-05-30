@@ -28,6 +28,11 @@ export interface RuntimeDevice {
   visibility: RuntimeVisibility;
   timezone: string;
   last_seen_at: string | null;
+  // Server-derived heartbeat health from status + last_seen_at.
+  // Older backends may omit this field.
+  health_status?: "online" | "stale" | "offline" | "unknown";
+  // Age of last_seen_at in seconds; null/undefined means unknown.
+  heartbeat_age_seconds?: number | null;
   created_at: string;
   updated_at: string;
 }

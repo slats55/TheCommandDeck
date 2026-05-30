@@ -126,6 +126,7 @@ export default function CommandDeckPage() {
   const templates: CommandTemplate[] = templatesData?.templates ?? [];
   const runs: CommandRun[] = runsData?.command_runs ?? [];
   const runtimes = runtimesData ?? [];
+  const onlineRuntimes = runtimes.filter((rt) => rt.status === "online");
   const previews: PreviewRegistryEntry[] = previewsData?.previews ?? [];
 
   useWSEvent("command_run:updated", (payload) => {
@@ -220,6 +221,24 @@ export default function CommandDeckPage() {
       case "unhealthy":
       case "unavailable": return "text-red-600";
       default: return "text-amber-600";
+    }
+  };
+
+  const runtimeHealthLabel = (status?: string): string => {
+    switch (status) {
+      case "online": return "Online";
+      case "stale": return "Stale";
+      case "offline": return "Offline";
+      default: return "Unknown";
+    }
+  };
+
+  const runtimeHealthColor = (status?: string): string => {
+    switch (status) {
+      case "online": return "text-green-600";
+      case "stale": return "text-amber-600";
+      case "offline": return "text-red-600";
+      default: return "text-muted-foreground";
     }
   };
 
@@ -363,6 +382,45 @@ export default function CommandDeckPage() {
 
       {/* Command Runner Panel */}
       <div className="rounded-lg border bg-card p-6 space-y-4">
+        <h2 className="text-lg font-medium">Runtime Health</h2>
+        {runtimesLoading ? (
+          <p className="text-sm text-muted-foreground">Loading runtimes...</p>
+        ) : runtimes.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No runtimes are registered for this workspace.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {runtimes.map((runtime) => (
+              <div
+                key={runtime.id}
+                className="flex flex-col gap-1 rounded-md border p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{runtime.name || runtime.id}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {runtime.provider} · {runtime.runtime_mode}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className={runtimeHealthColor(runtime.health_status)}>
+                    {runtimeHealthLabel(runtime.health_status)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Last seen{" "}
+                    {runtime.last_seen_at
+                      ? new Date(runtime.last_seen_at).toLocaleTimeString()
+                      : "unknown"}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Command Runner Panel */}
+      <div className="rounded-lg border bg-card p-6 space-y-4">
         <h2 className="text-lg font-medium">Run a Command</h2>
 
         {/* Template selection */}
@@ -405,6 +463,10 @@ export default function CommandDeckPage() {
             <p className="text-sm text-muted-foreground">Loading runtimes...</p>
           ) : runtimes.length === 0 ? (
             <p className="text-sm text-muted-foreground">
+              No runtimes are registered for this workspace.
+            </p>
+          ) : onlineRuntimes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
               No online runtimes available. Connect a daemon to execute commands.
             </p>
           ) : (
@@ -414,13 +476,11 @@ export default function CommandDeckPage() {
               onChange={(e) => setSelectedRuntimeId(e.target.value)}
             >
               <option value="">-- Select a runtime --</option>
-              {runtimes
-                .filter((rt) => rt.status === "online")
-                .map((rt) => (
-                  <option key={rt.id} value={rt.id}>
-                    {rt.name ?? rt.id} ({rt.status})
-                  </option>
-                ))}
+              {onlineRuntimes.map((rt) => (
+                <option key={rt.id} value={rt.id}>
+                  {rt.name ?? rt.id} ({rt.status})
+                </option>
+              ))}
             </select>
           )}
         </div>

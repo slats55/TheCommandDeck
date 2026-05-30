@@ -33,8 +33,43 @@ type AgentRuntimeResponse struct {
 	Visibility string  `json:"visibility"`
 	Timezone   string  `json:"timezone"`
 	LastSeenAt *string `json:"last_seen_at"`
-	CreatedAt  string  `json:"created_at"`
-	UpdatedAt  string  `json:"updated_at"`
+	// HealthStatus is derived server-side from the runtime heartbeat evidence:
+	// status + last_seen_at. Values: online | stale | offline | unknown.
+	HealthStatus string `json:"health_status"`
+	// HeartbeatAgeSeconds is the age of last_seen_at in seconds. Nil means
+	// last_seen_at is not available.
+	HeartbeatAgeSeconds *int64 `json:"heartbeat_age_seconds,omitempty"`
+	CreatedAt           string `json:"created_at"`
+	UpdatedAt           string `json:"updated_at"`
+}
+
+const (
+	runtimeOnlineFreshThreshold = 45 * time.Second
+	runtimeOfflineRecentWindow  = 5 * time.Minute
+)
+
+func deriveRuntimeHealthStatus(rt db.AgentRuntime, now time.Time) (string, *int64) {
+	if !rt.LastSeenAt.Valid {
+		return "unknown", nil
+	}
+
+	age := now.Sub(rt.LastSeenAt.Time)
+	if age < 0 {
+		age = 0
+	}
+	ageSeconds := int64(age / time.Second)
+
+	if rt.Status == "online" {
+		if age <= runtimeOnlineFreshThreshold {
+			return "online", &ageSeconds
+		}
+		return "stale", &ageSeconds
+	}
+
+	if age <= runtimeOfflineRecentWindow {
+		return "stale", &ageSeconds
+	}
+	return "offline", &ageSeconds
 }
 
 func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
@@ -45,24 +80,27 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
+	healthStatus, heartbeatAgeSeconds := deriveRuntimeHealthStatus(rt, time.Now())
 
 	return AgentRuntimeResponse{
-		ID:           uuidToString(rt.ID),
-		WorkspaceID:  uuidToString(rt.WorkspaceID),
-		DaemonID:     textToPtr(rt.DaemonID),
-		Name:         rt.Name,
-		RuntimeMode:  rt.RuntimeMode,
-		Provider:     rt.Provider,
-		LaunchHeader: agent.LaunchHeader(rt.Provider),
-		Status:       rt.Status,
-		DeviceInfo:   rt.DeviceInfo,
-		Metadata:     metadata,
-		OwnerID:      uuidToPtr(rt.OwnerID),
-		Visibility:   rt.Visibility,
-		Timezone:     rt.Timezone,
-		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
-		CreatedAt:    timestampToString(rt.CreatedAt),
-		UpdatedAt:    timestampToString(rt.UpdatedAt),
+		ID:                  uuidToString(rt.ID),
+		WorkspaceID:         uuidToString(rt.WorkspaceID),
+		DaemonID:            textToPtr(rt.DaemonID),
+		Name:                rt.Name,
+		RuntimeMode:         rt.RuntimeMode,
+		Provider:            rt.Provider,
+		LaunchHeader:        agent.LaunchHeader(rt.Provider),
+		Status:              rt.Status,
+		DeviceInfo:          rt.DeviceInfo,
+		Metadata:            metadata,
+		OwnerID:             uuidToPtr(rt.OwnerID),
+		Visibility:          rt.Visibility,
+		Timezone:            rt.Timezone,
+		LastSeenAt:          timestampToPtr(rt.LastSeenAt),
+		HealthStatus:        healthStatus,
+		HeartbeatAgeSeconds: heartbeatAgeSeconds,
+		CreatedAt:           timestampToString(rt.CreatedAt),
+		UpdatedAt:           timestampToString(rt.UpdatedAt),
 	}
 }
 
