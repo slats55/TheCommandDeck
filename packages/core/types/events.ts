@@ -6,6 +6,7 @@ import type { TimelineEntry } from "./activity";
 import type { Workspace, MemberWithUser, Invitation } from "./workspace";
 import type { Project } from "./project";
 import type { Label } from "./label";
+import type { CommandRun } from "./commanddeck";
 
 // WebSocket event types (matching Go server protocol/events.go)
 export type WSEventType =
@@ -40,6 +41,7 @@ export type WSEventType =
   | "member:removed"
   | "daemon:heartbeat"
   | "daemon:register"
+  | "command_run:updated"
   | "skill:created"
   | "skill:updated"
   | "skill:deleted"
@@ -330,4 +332,8 @@ export interface InvitationDeclinedPayload {
 export interface InvitationRevokedPayload {
   invitation_id: string;
   invitee_email: string;
+}
+
+export interface CommandRunUpdatedPayload {
+  run: CommandRun;
 }

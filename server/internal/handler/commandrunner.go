@@ -246,6 +246,10 @@ func (h *Handler) HandleCommandRunnerRun(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	h.publish("command_run:updated", workspaceID, initiatorType, initiatorID, map[string]any{
+		"run": commandRunToResponse(run),
+	})
+
 	// Send execution request to daemon via daemon WebSocket.
 	// DaemonHub.DeliverDaemonRuntime sends the frame to all clients watching this runtime.
 	if h.DaemonHub != nil {
@@ -350,10 +354,18 @@ func (h *Handler) HandleCommandRunnerCancel(w http.ResponseWriter, r *http.Reque
 		requesterID = agentID
 	}
 	requesterUUID := util.MustParseUUID(requesterID)
-	_, _ = h.Queries.MarkCommandRunCancellationRequested(ctx, db.MarkCommandRunCancellationRequestedParams{
+	updatedRun, err := h.Queries.MarkCommandRunCancellationRequested(ctx, db.MarkCommandRunCancellationRequestedParams{
 		ID:                          runUUID,
 		CancellationRequestedByType: pgtype.Text{String: requesterType, Valid: true},
 		CancellationRequestedByID:   requesterUUID,
+	})
+	if err != nil {
+		slog.Error("mark command run cancellation requested failed", "run_id", runID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to request cancellation")
+		return
+	}
+	h.publish("command_run:updated", workspaceID, requesterType, requesterID, map[string]any{
+		"run": commandRunToResponse(updatedRun),
 	})
 	payloadBytes, _ := json.Marshal(payload)
 	frame := protocol.Message{
@@ -437,6 +449,59 @@ func (h *Handler) HandleCommandRunnerTemplates(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, map[string]any{"templates": resp})
 }
 
+// HandleDaemonCommandRunStartedWS processes an inbound command_run:started frame from
+// a daemon connected via the daemon WebSocket and updates the command_run state.
+func (h *Handler) HandleDaemonCommandRunStartedWS(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, payload json.RawMessage) error {
+	var started protocol.CommandRunStartedPayload
+	if err := json.Unmarshal(payload, &started); err != nil {
+		slog.Debug("HandleDaemonCommandRunStartedWS: failed to unmarshal payload", "error", err)
+		return err
+	}
+
+	runID, err := util.ParseUUID(started.CommandRunID)
+	if err != nil {
+		slog.Debug("HandleDaemonCommandRunStartedWS: invalid run_id", "run_id", started.CommandRunID)
+		return err
+	}
+
+	run, err := h.Queries.GetCommandRun(ctx, runID)
+	if err != nil {
+		slog.Warn("HandleDaemonCommandRunStartedWS: command run not found", "run_id", started.CommandRunID, "error", err)
+		return err
+	}
+	if run.Status != "pending" {
+		// Idempotent replay or late event; keep current state.
+		return nil
+	}
+
+	var startedAt pgtype.Timestamptz
+	startedAt.Time = time.Now()
+	startedAt.Valid = true
+
+	updatedRun, err := h.Queries.UpdateCommandRunResult(ctx, db.UpdateCommandRunResultParams{
+		ID:              runID,
+		Status:          "running",
+		ExitCode:        pgtype.Int4{},
+		Stdout:          pgtype.Text{},
+		Stderr:          pgtype.Text{},
+		FinishedAt:      pgtype.Timestamptz{},
+		DurationMs:      pgtype.Int4{},
+		StartedAt:       startedAt,
+		StdoutTruncated: run.StdoutTruncated,
+		StderrTruncated: run.StderrTruncated,
+	})
+	if err != nil {
+		slog.Error("HandleDaemonCommandRunStartedWS: update command run failed", "run_id", started.CommandRunID, "error", err)
+		return err
+	}
+
+	h.publish("command_run:updated", uuidToString(updatedRun.WorkspaceID), "system", "", map[string]any{
+		"run": commandRunToResponse(updatedRun),
+	})
+	slog.Info("command run started", "run_id", started.CommandRunID, "workspace_id", identity.WorkspaceID)
+	return nil
+}
+
 // HandleDaemonCommandRunWS processes an inbound command_run:result frame from a
 // daemon connected via the daemon WebSocket. It updates the command_run record.
 func (h *Handler) HandleDaemonCommandRunWS(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, payload json.RawMessage) error {
@@ -473,7 +538,7 @@ func (h *Handler) HandleDaemonCommandRunWS(ctx context.Context, identity daemonw
 		durationMs = pgtype.Int4{Int32: int32(result.DurationMs), Valid: true}
 	}
 
-	_, err = h.Queries.UpdateCommandRunResult(ctx, db.UpdateCommandRunResultParams{
+	updatedRun, err := h.Queries.UpdateCommandRunResult(ctx, db.UpdateCommandRunResultParams{
 		ID:              runID,
 		Status:          result.Status,
 		ExitCode:        exitCode,
@@ -519,6 +584,10 @@ func (h *Handler) HandleDaemonCommandRunWS(ctx context.Context, identity daemonw
 			slog.Warn("CreateCommandLedgerEntry failed (best-effort, non-blocking)", "run_id", result.CommandRunID, "error", err)
 		}
 	}
+
+	h.publish("command_run:updated", uuidToString(updatedRun.WorkspaceID), "system", "", map[string]any{
+		"run": commandRunToResponse(updatedRun),
+	})
 
 	slog.Info("command run completed", "run_id", result.CommandRunID, "status", result.Status)
 	return nil

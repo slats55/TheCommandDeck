@@ -13,7 +13,7 @@ import (
 )
 
 func TestWebSocketHandlerCancelBeforeExecuteYieldsCancelled(t *testing.T) {
-	send := make(chan []byte, 1)
+	send := make(chan []byte, 2)
 	h := NewWebSocketHandler(t.TempDir(), send, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	cancelPayload, _ := json.Marshal(protocol.CommandRunCancelPayload{
 		CommandRunID: "run-1",
@@ -34,7 +34,7 @@ func TestWebSocketHandlerCancelBeforeExecuteYieldsCancelled(t *testing.T) {
 }
 
 func TestWebSocketHandlerCancelActiveRunYieldsCancelled(t *testing.T) {
-	send := make(chan []byte, 2)
+	send := make(chan []byte, 4)
 	h := NewWebSocketHandler(t.TempDir(), send, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	h.executor.runFn = func(ctx context.Context, _ *exec.Cmd, _, _ int) (string, string, int, bool, bool, error) {
 		<-ctx.Done()
@@ -55,6 +55,39 @@ func TestWebSocketHandlerCancelActiveRunYieldsCancelled(t *testing.T) {
 	result := recvResult(t, send)
 	if result.Status != "cancelled" {
 		t.Fatalf("expected cancelled status, got %q", result.Status)
+	}
+}
+
+func TestWebSocketHandlerEmitsRunningBeforeResult(t *testing.T) {
+	send := make(chan []byte, 4)
+	h := NewWebSocketHandler(t.TempDir(), send, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h.executor.allowedCommands[commandKey([]string{"git", "status"})] = true
+
+	execPayload, _ := json.Marshal(CommandRunExecutePayload{
+		CommandRunID: "run-live-1",
+		Command:      "git status",
+	})
+	h.Handle(execPayload)
+
+	started := recvByType(t, send, protocol.CommandRunStarted)
+	if started.Type != protocol.CommandRunStarted {
+		t.Fatalf("expected %q frame, got %q", protocol.CommandRunStarted, started.Type)
+	}
+	var startedPayload protocol.CommandRunStartedPayload
+	if err := json.Unmarshal(started.Payload, &startedPayload); err != nil {
+		t.Fatalf("unmarshal started payload: %v", err)
+	}
+	if startedPayload.CommandRunID != "run-live-1" || startedPayload.Status != "running" {
+		t.Fatalf("unexpected started payload: %+v", startedPayload)
+	}
+
+	resultFrame := recvByType(t, send, protocol.CommandRunResult)
+	var result CommandRunResultPayload
+	if err := json.Unmarshal(resultFrame.Payload, &result); err != nil {
+		t.Fatalf("unmarshal result payload: %v", err)
+	}
+	if result.CommandRunID != "run-live-1" {
+		t.Fatalf("unexpected result payload: %+v", result)
 	}
 }
 
@@ -93,19 +126,30 @@ func TestWebSocketHandlerPruneCanceledDropsExpiredRunIDs(t *testing.T) {
 
 func recvResult(t *testing.T, ch <-chan []byte) CommandRunResultPayload {
 	t.Helper()
-	select {
-	case frame := <-ch:
-		var msg protocol.Message
-		if err := json.Unmarshal(frame, &msg); err != nil {
-			t.Fatalf("unmarshal frame: %v", err)
+	msg := recvByType(t, ch, protocol.CommandRunResult)
+	var result CommandRunResultPayload
+	if err := json.Unmarshal(msg.Payload, &result); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	return result
+}
+
+func recvByType(t *testing.T, ch <-chan []byte, eventType string) protocol.Message {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case frame := <-ch:
+			var msg protocol.Message
+			if err := json.Unmarshal(frame, &msg); err != nil {
+				t.Fatalf("unmarshal frame: %v", err)
+			}
+			if msg.Type == eventType {
+				return msg
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for %s", eventType)
+			return protocol.Message{}
 		}
-		var result CommandRunResultPayload
-		if err := json.Unmarshal(msg.Payload, &result); err != nil {
-			t.Fatalf("unmarshal payload: %v", err)
-		}
-		return result
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for command result")
-		return CommandRunResultPayload{}
 	}
 }
