@@ -1358,6 +1358,12 @@ export class ApiClient {
     return this.fetch(`/api/commandrunner/run/${runId}`);
   }
 
+  async cancelCommandRun(runId: string): Promise<{ status: string; id: string }> {
+    return this.fetch(`/api/commandrunner/run/${runId}/cancel`, {
+      method: "POST",
+    });
+  }
+
   async listCommandRuns(): Promise<CommandRunListResponse> {
     return this.fetch("/api/commandrunner/runs");
   }

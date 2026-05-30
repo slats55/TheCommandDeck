@@ -200,6 +200,25 @@ describe("ApiClient", () => {
     expect(result).toEqual({ previews: [], last_checked_at: "" });
   });
 
+  it("posts run cancellation using the fixed commandrunner endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "cancellation_requested", id: "run-1" }), {
+        status: 202,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const result = await client.cancelCommandRun("run-1");
+
+    expect(result).toEqual({ status: "cancellation_requested", id: "run-1" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://api.example.test/api/commandrunner/run/run-1/cancel");
+    expect(init?.method).toBe("POST");
+  });
+
   describe("getAttachment", () => {
     it("returns the parsed attachment for a well-formed response", async () => {
       vi.stubGlobal(

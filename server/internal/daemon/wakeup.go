@@ -295,6 +295,10 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 			if d.cmdexecHandler != nil {
 				d.cmdexecHandler.Handle(msg.Payload)
 			}
+		case protocol.CommandRunCancel:
+			if d.cmdexecHandler != nil {
+				d.cmdexecHandler.HandleCancel(msg.Payload)
+			}
 		}
 	}
 }

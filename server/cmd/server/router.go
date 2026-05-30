@@ -477,6 +477,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/previews/self-hosted/sync", h.HandleCommandDeckPreviewSelfHostedSync)
 				r.Post("/run", h.HandleCommandRunnerRun)
 				r.Get("/run/{runId}", h.HandleCommandRunnerGet)
+				r.Post("/run/{runId}/cancel", h.HandleCommandRunnerCancel)
 				r.Get("/runs", h.HandleCommandRunnerList)
 			})
 

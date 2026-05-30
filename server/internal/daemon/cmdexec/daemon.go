@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"sync"
 
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -36,6 +37,9 @@ type WebSocketHandler struct {
 	executor *Executor
 	send     chan []byte // same channel used by the daemon's WS writePump
 	logger   *slog.Logger
+	mu       sync.Mutex
+	active   map[string]context.CancelFunc
+	canceled map[string]struct{}
 }
 
 // NewWebSocketHandler creates a handler that sends result frames on the provided
@@ -45,6 +49,8 @@ func NewWebSocketHandler(workspacesRoot string, sendChan chan []byte, logger *sl
 		executor: NewExecutor(workspacesRoot),
 		send:     sendChan,
 		logger:   logger,
+		active:   make(map[string]context.CancelFunc),
+		canceled: make(map[string]struct{}),
 	}
 }
 
@@ -70,20 +76,58 @@ func (h *WebSocketHandler) Handle(rawPayload json.RawMessage) {
 		workingDir = execPayload.AllowedDir
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), MaxDuration)
-	defer cancel()
+	if h.consumeCanceled(execPayload.CommandRunID) {
+		h.sendResult(CommandRunResultPayload{
+			CommandRunID: execPayload.CommandRunID,
+			Status:       "cancelled",
+			ExitCode:     1,
+			Stderr:       "command cancelled before execution",
+		})
+		return
+	}
 
-	result := h.executor.Execute(ctx, execPayload.Command, workingDir)
+	runCtx, cancel := context.WithCancel(context.Background())
+	h.setActive(execPayload.CommandRunID, cancel)
+	go h.executeRun(runCtx, execPayload, workingDir)
+}
 
-	resultPayload := CommandRunResultPayload{
+// HandleCancel processes an inbound command_run:cancel frame.
+func (h *WebSocketHandler) HandleCancel(rawPayload json.RawMessage) {
+	var cancelPayload protocol.CommandRunCancelPayload
+	if err := json.Unmarshal(rawPayload, &cancelPayload); err != nil {
+		h.logger.Debug("command_run:cancel: failed to unmarshal payload", "error", err)
+		return
+	}
+	if cancelPayload.CommandRunID == "" {
+		h.logger.Debug("command_run:cancel: missing command_run_id")
+		return
+	}
+	h.cancelRun(cancelPayload.CommandRunID)
+}
+
+func (h *WebSocketHandler) executeRun(runCtx context.Context, execPayload CommandRunExecutePayload, workingDir string) {
+	result := h.executor.Execute(runCtx, execPayload.Command, workingDir)
+	if runCtx.Err() == context.Canceled && result.Status != "timeout" {
+		result.Status = "cancelled"
+		if result.ExitCode == 0 {
+			result.ExitCode = 1
+		}
+		if result.Stderr == "" {
+			result.Stderr = "command cancelled by request"
+		}
+	}
+	h.clearActive(execPayload.CommandRunID)
+	h.sendResult(CommandRunResultPayload{
 		CommandRunID: execPayload.CommandRunID,
 		Status:       result.Status,
 		ExitCode:     result.ExitCode,
 		Stdout:       result.Stdout,
 		Stderr:       result.Stderr,
 		DurationMs:   result.DurationMs,
-	}
+	})
+}
 
+func (h *WebSocketHandler) sendResult(resultPayload CommandRunResultPayload) {
 	frame, err := json.Marshal(protocol.Message{
 		Type:    protocol.CommandRunResult,
 		Payload: mustMarshal(resultPayload),
@@ -92,13 +136,45 @@ func (h *WebSocketHandler) Handle(rawPayload json.RawMessage) {
 		h.logger.Debug("command_run:result: failed to marshal", "error", err)
 		return
 	}
-
 	select {
 	case h.send <- frame:
 	default:
-		h.logger.Debug("command_run:result: send buffer full, dropping result",
-			"command_run_id", execPayload.CommandRunID)
+		h.logger.Debug("command_run:result: send buffer full, dropping result", "command_run_id", resultPayload.CommandRunID)
 	}
+}
+
+func (h *WebSocketHandler) setActive(runID string, cancel context.CancelFunc) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.active[runID] = cancel
+}
+
+func (h *WebSocketHandler) clearActive(runID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.active, runID)
+	delete(h.canceled, runID)
+}
+
+func (h *WebSocketHandler) cancelRun(runID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if cancel, ok := h.active[runID]; ok {
+		h.canceled[runID] = struct{}{}
+		cancel()
+		return
+	}
+	h.canceled[runID] = struct{}{}
+}
+
+func (h *WebSocketHandler) consumeCanceled(runID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, ok := h.canceled[runID]; !ok {
+		return false
+	}
+	delete(h.canceled, runID)
+	return true
 }
 
 func mustMarshal(v any) json.RawMessage {

@@ -11,6 +11,7 @@ const { apiMock } = vi.hoisted(() => ({
     listPreviewRegistry: vi.fn(),
     syncSelfHostedPreviewRegistry: vi.fn(),
     runCommand: vi.fn(),
+    cancelCommandRun: vi.fn(),
   },
 }));
 
@@ -46,6 +47,39 @@ describe("CommandDeckPage Preview Registry", () => {
       previews: [],
       last_checked_at: "2026-05-29T00:00:00Z",
     });
+  });
+
+  it("shows cancel control only for active runs and sends run-scoped cancellation", async () => {
+    apiMock.listCommandRuns.mockResolvedValueOnce({
+      command_runs: [
+        {
+          id: "run-1",
+          status: "running",
+          command: "git status",
+          working_directory: "/tmp/ws",
+          created_at: "2026-05-29T00:00:00Z",
+        },
+        {
+          id: "run-2",
+          status: "completed",
+          command: "git diff --stat",
+          working_directory: "/tmp/ws",
+          created_at: "2026-05-29T00:00:00Z",
+        },
+      ],
+      total: 2,
+    });
+    apiMock.cancelCommandRun.mockResolvedValue({ status: "cancellation_requested", id: "run-1" });
+
+    render(<CommandDeckPage />, { wrapper: createWrapper() });
+
+    const cancel = await screen.findByRole("button", { name: "Cancel run" });
+    fireEvent.click(cancel);
+
+    await waitFor(() => {
+      expect(apiMock.cancelCommandRun).toHaveBeenCalledWith("run-1");
+    });
+    expect(screen.getByText("Cancellation requested.")).toBeInTheDocument();
   });
 
   it("shows real preview URL and healthy state from the API response", async () => {

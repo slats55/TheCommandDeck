@@ -73,6 +73,16 @@ export default function CommandDeckPage() {
       setStatusMessage(`Failed to dispatch command: ${err.message}`);
     },
   });
+  const cancelMutation = useMutation({
+    mutationFn: (runId: string) => api.cancelCommandRun(runId),
+    onSuccess: () => {
+      setStatusMessage("Cancellation requested.");
+      queryClient.invalidateQueries({ queryKey: ["commanddeck", "runs", wsId] });
+    },
+    onError: (err: Error) => {
+      setStatusMessage(`Failed to cancel command: ${err.message}`);
+    },
+  });
 
   const templates: CommandTemplate[] = templatesData?.templates ?? [];
   const runs: CommandRun[] = runsData?.command_runs ?? [];
@@ -95,6 +105,7 @@ export default function CommandDeckPage() {
       case "completed": return "Completed";
       case "failed": return "Failed";
       case "timeout": return "Timed out";
+      case "cancelled": return "Cancelled";
       default: return status;
     }
   };
@@ -104,6 +115,7 @@ export default function CommandDeckPage() {
       case "completed": return "text-green-600";
       case "failed":
       case "timeout": return "text-red-600";
+      case "cancelled": return "text-orange-600";
       case "running":
       case "pending": return "text-amber-600";
       default: return "text-gray-500";
@@ -393,6 +405,7 @@ export default function CommandDeckPage() {
                   <th className="py-2 pr-4 font-medium">Duration</th>
                   <th className="py-2 pr-4 font-medium">Created</th>
                   <th className="py-2 font-medium">Output</th>
+                  <th className="py-2 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -421,6 +434,19 @@ export default function CommandDeckPage() {
                         : run.stderr
                           ? `ERR: ${run.stderr.slice(0, 80)}`
                           : "—"}
+                    </td>
+                    <td className="py-2">
+                      {(run.status === "pending" || run.status === "running") ? (
+                        <button
+                          className="rounded-md border px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                          disabled={cancelMutation.isPending}
+                          onClick={() => cancelMutation.mutate(run.id)}
+                        >
+                          {cancelMutation.isPending ? "Cancelling..." : "Cancel run"}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
                     </td>
                   </tr>
                 ))}

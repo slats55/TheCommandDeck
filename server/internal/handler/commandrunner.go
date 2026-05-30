@@ -212,16 +212,16 @@ func (h *Handler) HandleCommandRunnerRun(w http.ResponseWriter, r *http.Request)
 
 	// Create command_run record in pending state.
 	run, err := h.Queries.CreateCommandRun(ctx, db.CreateCommandRunParams{
-		WorkspaceID:     wsUUID,
-		TemplateID:      templateID,
-		RuntimeID:       runtimeUUID,
-		IssueID:         issueID,
-		Command:         command,
-		Arguments:       []string{},
+		WorkspaceID:      wsUUID,
+		TemplateID:       templateID,
+		RuntimeID:        runtimeUUID,
+		IssueID:          issueID,
+		Command:          command,
+		Arguments:        []string{},
 		WorkingDirectory: worktreeRoot,
-		Status:          "pending",
-		InitiatorType:   initiatorType,
-		InitiatorID:     initiatorUUID,
+		Status:           "pending",
+		InitiatorType:    initiatorType,
+		InitiatorID:      initiatorUUID,
 	})
 	if err != nil {
 		slog.Error("create command run failed", "error", err)
@@ -283,6 +283,63 @@ func (h *Handler) HandleCommandRunnerGet(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, commandRunToResponse(run))
 }
 
+// HandleCommandRunnerCancel requests cancellation of an active command run.
+func (h *Handler) HandleCommandRunnerCancel(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "workspaceID")
+	runID := chi.URLParam(r, "runId")
+	if runID == "" {
+		writeError(w, http.StatusBadRequest, "run_id is required")
+		return
+	}
+	runUUID, ok := parseUUIDOrBadRequest(w, runID, "run_id")
+	if !ok {
+		return
+	}
+
+	ctx := r.Context()
+	run, err := h.Queries.GetCommandRun(ctx, runUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "command run not found")
+		return
+	}
+	if uuidToString(run.WorkspaceID) != workspaceID {
+		writeError(w, http.StatusNotFound, "command run not found")
+		return
+	}
+
+	switch run.Status {
+	case "completed", "failed", "timeout", "cancelled":
+		writeError(w, http.StatusConflict, "command run is already finished")
+		return
+	case "pending", "running":
+	default:
+		writeError(w, http.StatusConflict, "command run cannot be cancelled in current state")
+		return
+	}
+
+	if h.DaemonHub == nil {
+		writeError(w, http.StatusConflict, "runtime control channel unavailable")
+		return
+	}
+
+	payload := protocol.CommandRunCancelPayload{
+		CommandRunID: runID,
+		RuntimeID:    uuidToString(run.RuntimeID),
+	}
+	payloadBytes, _ := json.Marshal(payload)
+	frame := protocol.Message{
+		Type:    protocol.CommandRunCancel,
+		Payload: payloadBytes,
+	}
+	frameBytes, _ := json.Marshal(frame)
+	h.DaemonHub.DeliverDaemonRuntime(payload.RuntimeID, frameBytes, "")
+
+	writeJSON(w, http.StatusAccepted, map[string]string{
+		"status": "cancellation_requested",
+		"id":     runID,
+	})
+}
+
 // HandleCommandRunnerList returns command runs for the workspace.
 func (h *Handler) HandleCommandRunnerList(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "workspaceID")
@@ -327,7 +384,7 @@ func (h *Handler) HandleCommandRunnerTemplates(w http.ResponseWriter, r *http.Re
 		Description *string `json:"description,omitempty"`
 		Category    string  `json:"category"`
 		RiskLevel   string  `json:"risk_level"`
-		IsBuiltin bool    `json:"is_builtin"`
+		IsBuiltin   bool    `json:"is_builtin"`
 		CreatedAt   string  `json:"created_at"`
 	}
 
@@ -410,22 +467,22 @@ func (h *Handler) HandleDaemonCommandRunWS(ctx context.Context, identity daemonw
 		stdoutHash := hashString(result.Stdout)
 		stderrHash := hashString(result.Stderr)
 		_, err = h.Queries.CreateCommandLedgerEntry(ctx, db.CreateCommandLedgerEntryParams{
-			CommandRunID:    runRow.ID,
-			WorkspaceID:     runRow.WorkspaceID,
-			TemplateID:      runRow.TemplateID,
-			RuntimeID:       runRow.RuntimeID,
-			Command:         runRow.Command,
-			Arguments:       runRow.Arguments,
+			CommandRunID:     runRow.ID,
+			WorkspaceID:      runRow.WorkspaceID,
+			TemplateID:       runRow.TemplateID,
+			RuntimeID:        runRow.RuntimeID,
+			Command:          runRow.Command,
+			Arguments:        runRow.Arguments,
 			WorkingDirectory: runRow.WorkingDirectory,
-			InitiatorType:  runRow.InitiatorType,
-			InitiatorID:    runRow.InitiatorID,
-			Status:         result.Status,
-			ExitCode:       exitCode,
-			StdoutHash:     toText(stdoutHash),
-			StderrHash:     toText(stderrHash),
-			StartedAt:       startedAt,
-			FinishedAt:      finishedAt,
-			DurationMs:     durationMs,
+			InitiatorType:    runRow.InitiatorType,
+			InitiatorID:      runRow.InitiatorID,
+			Status:           result.Status,
+			ExitCode:         exitCode,
+			StdoutHash:       toText(stdoutHash),
+			StderrHash:       toText(stderrHash),
+			StartedAt:        startedAt,
+			FinishedAt:       finishedAt,
+			DurationMs:       durationMs,
 		})
 		if err != nil {
 			slog.Warn("CreateCommandLedgerEntry failed (best-effort, non-blocking)", "run_id", result.CommandRunID, "error", err)
