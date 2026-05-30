@@ -107,6 +107,7 @@ export default function CommandDeckPage() {
     switch (status) {
       case "healthy": return "Healthy";
       case "unhealthy": return "Unhealthy";
+      case "unavailable": return "Unavailable";
       default: return "Unknown";
     }
   };
@@ -114,7 +115,8 @@ export default function CommandDeckPage() {
   const previewHealthColor = (status: PreviewRegistryEntry["health_status"]): string => {
     switch (status) {
       case "healthy": return "text-green-600";
-      case "unhealthy": return "text-red-600";
+      case "unhealthy":
+      case "unavailable": return "text-red-600";
       default: return "text-amber-600";
     }
   };
@@ -209,9 +211,9 @@ export default function CommandDeckPage() {
                   </div>
                 </dl>
 
-                {preview.health_error && (
+                {preview.health_message && (
                   <p className="mt-3 break-all text-xs text-red-600">
-                    {preview.health_error}
+                    {preview.health_message}
                   </p>
                 )}
               </div>

@@ -101,8 +101,10 @@ import {
   CommentsListSchema,
   EMPTY_ATTACHMENT,
   EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_PREVIEW_REGISTRY_RESPONSE,
   EMPTY_TIMELINE_ENTRIES,
   ListIssuesResponseSchema,
+  PreviewRegistryResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
 } from "./schemas";
@@ -1361,6 +1363,12 @@ export class ApiClient {
   }
 
   async listPreviewRegistry(): Promise<PreviewRegistryResponse> {
-    return this.fetch("/api/commandrunner/previews");
+    const response = await this.fetch<unknown>("/api/commandrunner/previews");
+    return parseWithFallback<PreviewRegistryResponse>(
+      response,
+      PreviewRegistryResponseSchema,
+      EMPTY_PREVIEW_REGISTRY_RESPONSE,
+      { endpoint: "listPreviewRegistry" },
+    );
   }
 }

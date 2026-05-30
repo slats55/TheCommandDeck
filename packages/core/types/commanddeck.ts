@@ -38,7 +38,7 @@ export interface CommandTemplatesResponse {
   templates: CommandTemplate[];
 }
 
-export type PreviewHealthStatus = "healthy" | "unhealthy" | "unknown";
+export type PreviewHealthStatus = "healthy" | "unhealthy" | "unavailable" | "unknown";
 
 export interface PreviewRegistryEntry {
   id: string;
@@ -55,6 +55,7 @@ export interface PreviewRegistryEntry {
   port: number;
   health_status: PreviewHealthStatus;
   health_status_code?: number | null;
+  health_message?: string | null;
   health_error?: string | null;
   last_checked_at: string;
   command_run_id?: string | null;
