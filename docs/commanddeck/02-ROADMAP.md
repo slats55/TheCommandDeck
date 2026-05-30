@@ -97,14 +97,19 @@ Completed:
   - release track: `R0.1`
 - `COMMANDDECK-COMMAND-RUN-LIVE-EVENTS-018`
   - objective: workspace-scoped live command-run lifecycle events into CommandDeck UI with safe fallback polling
-  - branch/commit: `feature/commanddeck-command-run-live-events-018` / `PENDING_MERGE`
-  - acceptance gate: `CODEX_AUTHORIZED_ACCEPTANCE_GATE` in progress on branch
+  - branch/commit: `feature/commanddeck-command-run-live-events-018` / `45bf5b820df745306cb8cca9be2385bee4a4519e` (merged)
+  - acceptance gate: `CODEX_AUTHORIZED_ACCEPTANCE_GATE` passed (doctor/backend/frontend/full-suite/build/health)
   - release track: `R0.1`
+- `COMMANDDECK-RUNTIME-HEALTH-HEARTBEAT-OFFLINE-019`
+  - objective: truthful runtime heartbeat/offline status board with server-derived health status
+  - branch/commit: `feature/commanddeck-runtime-health-heartbeat-offline-019` / `PENDING_MERGE`
+  - acceptance gate: `CODEX_AUTHORIZED_ACCEPTANCE_GATE` passed on branch (pending merge)
+  - release track: `R0.2`
 
 Next selected slice:
-- `COMMANDDECK-RUNTIME-HEALTH-HEARTBEAT-OFFLINE-019`
-  - objective: truthful runtime heartbeat/offline status board (workspace-scoped)
-  - dependency: merge and verify `018`
+- `COMMANDDECK-PREVIEW-COMMAND-PROVENANCE-020`
+  - objective: trusted preview-to-command provenance linkage where evidence is server-provable
+  - dependency: merge and verify `019`
   - release track: `R0.2`
 
 Backlog candidates:

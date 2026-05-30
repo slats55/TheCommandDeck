@@ -106,6 +106,78 @@ describe("CommandDeckPage Preview Registry", () => {
     expect(screen.getByText("Cancellation requested.")).toBeInTheDocument();
   });
 
+  it("renders runtime heartbeat health states from server evidence", async () => {
+    apiMock.listRuntimes.mockResolvedValue([
+      {
+        id: "rt-online",
+        name: "Online Runtime",
+        provider: "codex",
+        runtime_mode: "local",
+        status: "online",
+        health_status: "online",
+        last_seen_at: "2026-05-29T00:00:00Z",
+      },
+      {
+        id: "rt-stale",
+        name: "Stale Runtime",
+        provider: "claude",
+        runtime_mode: "local",
+        status: "online",
+        health_status: "stale",
+        last_seen_at: "2026-05-29T00:00:00Z",
+      },
+      {
+        id: "rt-offline",
+        name: "Offline Runtime",
+        provider: "copilot",
+        runtime_mode: "local",
+        status: "offline",
+        health_status: "offline",
+        last_seen_at: "2026-05-29T00:00:00Z",
+      },
+      {
+        id: "rt-unknown",
+        name: "Unknown Runtime",
+        provider: "gemini",
+        runtime_mode: "local",
+        status: "offline",
+        health_status: "unknown",
+        last_seen_at: null,
+      },
+    ]);
+
+    render(<CommandDeckPage />, { wrapper: createWrapper() });
+
+    expect(await screen.findByText("Runtime Health")).toBeInTheDocument();
+    expect(await screen.findByText("Online Runtime")).toBeInTheDocument();
+    expect(screen.getByText("Stale Runtime")).toBeInTheDocument();
+    expect(screen.getByText("Offline Runtime")).toBeInTheDocument();
+    expect(screen.getByText("Unknown Runtime")).toBeInTheDocument();
+    expect(screen.getByText("Online")).toBeInTheDocument();
+    expect(screen.getByText("Stale")).toBeInTheDocument();
+    expect(screen.getByText("Offline")).toBeInTheDocument();
+    expect(screen.getByText("Unknown")).toBeInTheDocument();
+    expect(screen.getByText("Last seen unknown")).toBeInTheDocument();
+  });
+
+  it("keeps execution disabled when no runtime is online", async () => {
+    apiMock.listRuntimes.mockResolvedValue([
+      {
+        id: "rt-offline-only",
+        name: "Offline Runtime",
+        provider: "codex",
+        runtime_mode: "local",
+        status: "offline",
+        health_status: "offline",
+        last_seen_at: "2026-05-29T00:00:00Z",
+      },
+    ]);
+
+    render(<CommandDeckPage />, { wrapper: createWrapper() });
+
+    expect(await screen.findByText("No online runtimes available. Connect a daemon to execute commands.")).toBeInTheDocument();
+  });
+
   it("applies live command_run:updated events to run history without polling", async () => {
     apiMock.listCommandRuns.mockResolvedValueOnce({
       command_runs: [
