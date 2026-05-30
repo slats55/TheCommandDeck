@@ -102,14 +102,24 @@ Completed:
   - release track: `R0.1`
 - `COMMANDDECK-RUNTIME-HEALTH-HEARTBEAT-OFFLINE-019`
   - objective: truthful runtime heartbeat/offline status board with server-derived health status
-  - branch/commit: `feature/commanddeck-runtime-health-heartbeat-offline-019` / `PENDING_MERGE`
-  - acceptance gate: `CODEX_AUTHORIZED_ACCEPTANCE_GATE` passed on branch (pending merge)
+  - branch/commit: `feature/commanddeck-runtime-health-heartbeat-offline-019` / `5b154fc8af552f33a6afefd349c44f94191275c9` (merged)
+  - acceptance gate: `CODEX_AUTHORIZED_ACCEPTANCE_GATE` passed (doctor/backend/frontend/full-suite/build/health)
   - release track: `R0.2`
-
-Next selected slice:
 - `COMMANDDECK-PREVIEW-COMMAND-PROVENANCE-020`
   - objective: trusted preview-to-command provenance linkage where evidence is server-provable
-  - dependency: merge and verify `019`
+  - branch/commit: `feature/commanddeck-preview-command-provenance-020` / `DEFERRED_NO_SAFE_LINKAGE_PREREQUISITE`
+  - acceptance gate: `CODEX_AUTHORIZED_ACCEPTANCE_GATE` no-go for implementation (safe provenance source not present)
+  - release track: `R0.2`
+  - blocker:
+    - current trusted preview write path (`POST /api/commandrunner/previews/self-hosted/sync`) intentionally persists `runtime_id=NULL` and `command_run_id=NULL`
+    - command executor allowlist currently permits only git inspection commands, so no trusted preview-start command-run signal exists
+  - required dependency:
+    - add a trusted server-side preview registration path sourced from daemon/runtime-authenticated execution evidence carrying `command_run_id` + `runtime_id`
+
+Next selected slice:
+- `COMMANDDECK-PREVIEW-PROVENANCE-PREREQ-020A`
+  - objective: create trusted daemon/runtime-authenticated preview registration event path that can safely persist `command_run_id`/`runtime_id`
+  - dependency: none beyond `019` (already merged)
   - release track: `R0.2`
 
 Backlog candidates:
