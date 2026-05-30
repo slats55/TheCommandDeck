@@ -146,4 +146,31 @@ describe("CommandDeckPage Preview Registry", () => {
       expect(apiMock.syncSelfHostedPreviewRegistry).toHaveBeenCalledTimes(1);
     });
   });
+
+  it("renders stale lifecycle when last check is too old", async () => {
+    apiMock.listPreviewRegistry.mockResolvedValueOnce({
+      previews: [
+        {
+          id: "self-hosted-web",
+          workspace_id: "workspace-1",
+          workspace_name: "Acme",
+          workspace_slug: "acme",
+          preview_url: "http://localhost:3000",
+          port: 3000,
+          health_status: "healthy",
+          health_status_code: 200,
+          last_checked_at: "2026-05-29T00:00:00Z",
+          last_success_at: "2026-05-29T00:00:00Z",
+          registered_at: "2026-05-28T00:00:00Z",
+          updated_at: "2026-05-29T00:00:00Z",
+          source: "self_hosted_stack",
+        },
+      ],
+      last_checked_at: "2026-05-29T00:00:00Z",
+    });
+
+    render(<CommandDeckPage />, { wrapper: createWrapper() });
+    expect(await screen.findByText("Lifecycle")).toBeInTheDocument();
+    expect(await screen.findByText("Stale")).toBeInTheDocument();
+  });
 });

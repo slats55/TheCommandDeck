@@ -119,6 +119,29 @@ export default function CommandDeckPage() {
     }
   };
 
+  const isPreviewStale = (preview: PreviewRegistryEntry): boolean => {
+    if (!preview.last_checked_at) return true;
+    const checked = new Date(preview.last_checked_at).getTime();
+    if (Number.isNaN(checked)) return true;
+    return Date.now() - checked > 5 * 60 * 1000;
+  };
+
+  const previewLifecycleLabel = (preview: PreviewRegistryEntry): string => {
+    if (isPreviewStale(preview)) return "Stale";
+    if (preview.health_status === "healthy") return "Healthy";
+    if (preview.last_success_at) return "Last known healthy";
+    if (preview.health_status === "unavailable") return "Unavailable";
+    return "Registered";
+  };
+
+  const previewLifecycleColor = (preview: PreviewRegistryEntry): string => {
+    if (isPreviewStale(preview)) return "text-amber-600";
+    if (preview.health_status === "healthy") return "text-green-600";
+    if (preview.last_success_at) return "text-amber-600";
+    if (preview.health_status === "unavailable") return "text-red-600";
+    return "text-muted-foreground";
+  };
+
   const previewHealthColor = (status: PreviewRegistryEntry["health_status"]): string => {
     switch (status) {
       case "healthy": return "text-green-600";
@@ -244,6 +267,10 @@ export default function CommandDeckPage() {
                         ? new Date(preview.last_success_at).toLocaleString()
                         : "-"}
                     </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs uppercase text-muted-foreground">Lifecycle</dt>
+                    <dd className={previewLifecycleColor(preview)}>{previewLifecycleLabel(preview)}</dd>
                   </div>
                   <div>
                     <dt className="text-xs uppercase text-muted-foreground">Command</dt>
