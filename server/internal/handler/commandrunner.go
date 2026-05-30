@@ -26,17 +26,22 @@ type CommandRunnerRunRequest struct {
 
 // CommandRunnerRunResponse is the API response after creating a command run.
 type CommandRunnerRunResponse struct {
-	ID               string  `json:"id"`
-	Status           string  `json:"status"`
-	Command          string  `json:"command"`
-	WorkingDirectory string  `json:"working_directory"`
-	ExitCode         *int    `json:"exit_code,omitempty"`
-	Stdout           *string `json:"stdout,omitempty"`
-	Stderr           *string `json:"stderr,omitempty"`
-	DurationMs       *int    `json:"duration_ms,omitempty"`
-	StartedAt        *string `json:"started_at,omitempty"`
-	FinishedAt       *string `json:"finished_at,omitempty"`
-	CreatedAt        string  `json:"created_at"`
+	ID                          string  `json:"id"`
+	Status                      string  `json:"status"`
+	Command                     string  `json:"command"`
+	WorkingDirectory            string  `json:"working_directory"`
+	ExitCode                    *int    `json:"exit_code,omitempty"`
+	Stdout                      *string `json:"stdout,omitempty"`
+	Stderr                      *string `json:"stderr,omitempty"`
+	DurationMs                  *int    `json:"duration_ms,omitempty"`
+	StdoutTruncated             bool    `json:"stdout_truncated"`
+	StderrTruncated             bool    `json:"stderr_truncated"`
+	CancellationRequestedAt     *string `json:"cancellation_requested_at,omitempty"`
+	CancellationRequestedByType *string `json:"cancellation_requested_by_type,omitempty"`
+	CancellationRequestedByID   *string `json:"cancellation_requested_by_id,omitempty"`
+	StartedAt                   *string `json:"started_at,omitempty"`
+	FinishedAt                  *string `json:"finished_at,omitempty"`
+	CreatedAt                   string  `json:"created_at"`
 }
 
 // CommandRunnerRunListResponse is the API response for listing command runs.
@@ -52,6 +57,8 @@ func commandRunToResponse(run db.CommandRun) CommandRunnerRunResponse {
 		Status:           run.Status,
 		Command:          run.Command,
 		WorkingDirectory: run.WorkingDirectory,
+		StdoutTruncated:  run.StdoutTruncated,
+		StderrTruncated:  run.StderrTruncated,
 		CreatedAt:        timestampToString(run.CreatedAt),
 	}
 	if run.ExitCode.Valid {
@@ -73,6 +80,16 @@ func commandRunToResponse(run db.CommandRun) CommandRunnerRunResponse {
 	}
 	if run.FinishedAt.Valid {
 		resp.FinishedAt = timestampToPtr(run.FinishedAt)
+	}
+	if run.CancellationRequestedAt.Valid {
+		resp.CancellationRequestedAt = timestampToPtr(run.CancellationRequestedAt)
+	}
+	if run.CancellationRequestedByType.Valid {
+		resp.CancellationRequestedByType = &run.CancellationRequestedByType.String
+	}
+	if run.CancellationRequestedByID.Valid {
+		id := uuidToString(run.CancellationRequestedByID)
+		resp.CancellationRequestedByID = &id
 	}
 	return resp
 }
@@ -326,6 +343,18 @@ func (h *Handler) HandleCommandRunnerCancel(w http.ResponseWriter, r *http.Reque
 		CommandRunID: runID,
 		RuntimeID:    uuidToString(run.RuntimeID),
 	}
+	requesterType := "member"
+	requesterID := requestUserID(r)
+	if agentID := r.Header.Get("X-Agent-ID"); agentID != "" && r.Header.Get("X-Task-ID") != "" {
+		requesterType = "agent"
+		requesterID = agentID
+	}
+	requesterUUID := util.MustParseUUID(requesterID)
+	_, _ = h.Queries.MarkCommandRunCancellationRequested(ctx, db.MarkCommandRunCancellationRequestedParams{
+		ID:                          runUUID,
+		CancellationRequestedByType: pgtype.Text{String: requesterType, Valid: true},
+		CancellationRequestedByID:   requesterUUID,
+	})
 	payloadBytes, _ := json.Marshal(payload)
 	frame := protocol.Message{
 		Type:    protocol.CommandRunCancel,
@@ -445,14 +474,16 @@ func (h *Handler) HandleDaemonCommandRunWS(ctx context.Context, identity daemonw
 	}
 
 	_, err = h.Queries.UpdateCommandRunResult(ctx, db.UpdateCommandRunResultParams{
-		ID:         runID,
-		Status:     result.Status,
-		ExitCode:   exitCode,
-		Stdout:     toText(result.Stdout),
-		Stderr:     toText(result.Stderr),
-		FinishedAt: finishedAt,
-		DurationMs: durationMs,
-		StartedAt:  startedAt,
+		ID:              runID,
+		Status:          result.Status,
+		ExitCode:        exitCode,
+		Stdout:          toText(result.Stdout),
+		Stderr:          toText(result.Stderr),
+		FinishedAt:      finishedAt,
+		DurationMs:      durationMs,
+		StartedAt:       startedAt,
+		StdoutTruncated: result.StdoutTruncated,
+		StderrTruncated: result.StderrTruncated,
 	})
 	if err != nil {
 		slog.Error("UpdateCommandRunResult failed", "run_id", result.CommandRunID, "error", err)

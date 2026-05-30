@@ -24,12 +24,14 @@ type CommandRunExecutePayload struct {
 // CommandRunResultPayload is the payload for command_run:result (daemon → server).
 // It carries the execution outcome for recording in the DB.
 type CommandRunResultPayload struct {
-	CommandRunID string `json:"command_run_id"`
-	Status       string `json:"status"` // "completed", "failed", "timeout", "cancelled"
-	ExitCode     int    `json:"exit_code,omitempty"`
-	Stdout       string `json:"stdout,omitempty"`
-	Stderr       string `json:"stderr,omitempty"`
-	DurationMs   int    `json:"duration_ms,omitempty"`
+	CommandRunID    string `json:"command_run_id"`
+	Status          string `json:"status"` // "completed", "failed", "timeout", "cancelled"
+	ExitCode        int    `json:"exit_code,omitempty"`
+	Stdout          string `json:"stdout,omitempty"`
+	Stderr          string `json:"stderr,omitempty"`
+	StdoutTruncated bool   `json:"stdout_truncated"`
+	StderrTruncated bool   `json:"stderr_truncated"`
+	DurationMs      int    `json:"duration_ms,omitempty"`
 }
 
 // CommandRunCancelPayload is the payload for command_run:cancel.

@@ -23,12 +23,14 @@ type CommandRunExecutePayload struct {
 
 // CommandRunResultPayload is the daemon → server payload for command_run:result.
 type CommandRunResultPayload struct {
-	CommandRunID string `json:"command_run_id"`
-	Status       string `json:"status"` // "completed", "failed", "timeout"
-	ExitCode     int    `json:"exit_code,omitempty"`
-	Stdout       string `json:"stdout,omitempty"`
-	Stderr       string `json:"stderr,omitempty"`
-	DurationMs   int    `json:"duration_ms,omitempty"`
+	CommandRunID    string `json:"command_run_id"`
+	Status          string `json:"status"` // "completed", "failed", "timeout", "cancelled"
+	ExitCode        int    `json:"exit_code,omitempty"`
+	Stdout          string `json:"stdout,omitempty"`
+	Stderr          string `json:"stderr,omitempty"`
+	StdoutTruncated bool   `json:"stdout_truncated"`
+	StderrTruncated bool   `json:"stderr_truncated"`
+	DurationMs      int    `json:"duration_ms,omitempty"`
 }
 
 // WebSocketHandler bridges between the daemon's WS connection and the Executor.
@@ -121,12 +123,14 @@ func (h *WebSocketHandler) executeRun(runCtx context.Context, execPayload Comman
 	}
 	h.clearActive(execPayload.CommandRunID)
 	h.sendResult(CommandRunResultPayload{
-		CommandRunID: execPayload.CommandRunID,
-		Status:       result.Status,
-		ExitCode:     result.ExitCode,
-		Stdout:       result.Stdout,
-		Stderr:       result.Stderr,
-		DurationMs:   result.DurationMs,
+		CommandRunID:    execPayload.CommandRunID,
+		Status:          result.Status,
+		ExitCode:        result.ExitCode,
+		Stdout:          result.Stdout,
+		Stderr:          result.Stderr,
+		StdoutTruncated: result.StdoutTruncated,
+		StderrTruncated: result.StderrTruncated,
+		DurationMs:      result.DurationMs,
 	})
 }
 

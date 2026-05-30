@@ -57,6 +57,8 @@ describe("CommandDeckPage Preview Registry", () => {
           status: "running",
           command: "git status",
           working_directory: "/tmp/ws",
+          stdout_truncated: false,
+          stderr_truncated: false,
           created_at: "2026-05-29T00:00:00Z",
         },
         {
@@ -64,6 +66,8 @@ describe("CommandDeckPage Preview Registry", () => {
           status: "completed",
           command: "git diff --stat",
           working_directory: "/tmp/ws",
+          stdout_truncated: false,
+          stderr_truncated: false,
           created_at: "2026-05-29T00:00:00Z",
         },
       ],
@@ -116,6 +120,28 @@ describe("CommandDeckPage Preview Registry", () => {
     expect(screen.getByText("HTTP 200")).toBeInTheDocument();
     expect(screen.getByText("Unlinked (self-hosted preview)")).toBeInTheDocument();
     expect(screen.getByText("Last Successful Check")).toBeInTheDocument();
+  });
+
+  it("renders structured truncation and cancellation evidence in run history", async () => {
+    apiMock.listCommandRuns.mockResolvedValueOnce({
+      command_runs: [
+        {
+          id: "run-3",
+          status: "cancelled",
+          command: "git status",
+          working_directory: "/tmp/ws",
+          stdout: "line 1",
+          stdout_truncated: true,
+          stderr_truncated: false,
+          cancellation_requested_at: "2026-05-29T00:00:00Z",
+          created_at: "2026-05-29T00:00:00Z",
+        },
+      ],
+      total: 1,
+    });
+    render(<CommandDeckPage />, { wrapper: createWrapper() });
+    expect(await screen.findByText("truncated")).toBeInTheDocument();
+    expect(screen.getByText(/cancel requested/i)).toBeInTheDocument();
   });
 
   it("shows a truthful loading state", () => {
