@@ -1,14 +1,18 @@
 package protocol
 
-// CommandRunExecute is the message type for server → daemon command execution requests.
-const CommandRunExecute = "command_run:execute"
+// Command-run message types.
+const (
+	// CommandRunExecute is sent server -> daemon to request execution.
+	CommandRunExecute = "command_run:execute"
+	// CommandRunStarted is sent daemon -> server when execution starts.
+	CommandRunStarted = "command_run:started"
+	// CommandRunResult is sent daemon -> server when execution finishes.
+	CommandRunResult = "command_run:result"
+	// CommandRunCancel is sent server -> daemon to request cancellation.
+	CommandRunCancel = "command_run:cancel"
+)
 
-// CommandRunResult is the message type for daemon → server command execution results.
-const CommandRunResult = "command_run:result"
-const CommandRunCancel = "command_run:cancel"
-
-// CommandRunExecutePayload is the payload for command_run:execute (server → daemon).
-// It carries the command to run, working directory, and execution context.
+// CommandRunExecutePayload is the payload for command_run:execute (server -> daemon).
 type CommandRunExecutePayload struct {
 	CommandRunID  string `json:"command_run_id"`
 	RuntimeID     string `json:"runtime_id"`                  // target runtime, for routing confirmation
@@ -21,8 +25,13 @@ type CommandRunExecutePayload struct {
 	IssueID       string `json:"issue_id,omitempty"`
 }
 
-// CommandRunResultPayload is the payload for command_run:result (daemon → server).
-// It carries the execution outcome for recording in the DB.
+// CommandRunStartedPayload is the payload for command_run:started (daemon -> server).
+type CommandRunStartedPayload struct {
+	CommandRunID string `json:"command_run_id"`
+	Status       string `json:"status"` // "running"
+}
+
+// CommandRunResultPayload is the payload for command_run:result (daemon -> server).
 type CommandRunResultPayload struct {
 	CommandRunID    string `json:"command_run_id"`
 	Status          string `json:"status"` // "completed", "failed", "timeout", "cancelled"
@@ -34,7 +43,7 @@ type CommandRunResultPayload struct {
 	DurationMs      int    `json:"duration_ms,omitempty"`
 }
 
-// CommandRunCancelPayload is the payload for command_run:cancel.
+// CommandRunCancelPayload is the payload for command_run:cancel (server -> daemon).
 type CommandRunCancelPayload struct {
 	CommandRunID string `json:"command_run_id"`
 	RuntimeID    string `json:"runtime_id"`

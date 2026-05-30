@@ -4,7 +4,46 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core";
-import type { CommandTemplate, CommandRun, PreviewRegistryEntry } from "@multica/core/types";
+import { useWSEvent } from "@multica/core/realtime";
+import type {
+  CommandTemplate,
+  CommandRun,
+  CommandRunUpdatedPayload,
+  CommandRunListResponse,
+  PreviewRegistryEntry,
+} from "@multica/core/types";
+
+function isCommandRun(value: unknown): value is CommandRun {
+  if (!value || typeof value !== "object") return false;
+  const run = value as Record<string, unknown>;
+  const hasString = (key: string) => typeof run[key] === "string";
+  const hasOptionalString = (key: string) => run[key] === undefined || typeof run[key] === "string";
+  const hasOptionalNumber = (key: string) => run[key] === undefined || typeof run[key] === "number";
+  return (
+    hasString("id") &&
+    hasString("status") &&
+    hasString("command") &&
+    hasString("working_directory") &&
+    hasString("created_at") &&
+    typeof run.stdout_truncated === "boolean" &&
+    typeof run.stderr_truncated === "boolean" &&
+    hasOptionalNumber("exit_code") &&
+    hasOptionalString("stdout") &&
+    hasOptionalString("stderr") &&
+    hasOptionalNumber("duration_ms") &&
+    hasOptionalString("started_at") &&
+    hasOptionalString("finished_at") &&
+    hasOptionalString("cancellation_requested_at") &&
+    hasOptionalString("cancellation_requested_by_type") &&
+    hasOptionalString("cancellation_requested_by_id")
+  );
+}
+
+function isCommandRunUpdatedPayload(value: unknown): value is CommandRunUpdatedPayload {
+  if (!value || typeof value !== "object") return false;
+  const payload = value as Record<string, unknown>;
+  return isCommandRun(payload.run);
+}
 
 export default function CommandDeckPage() {
   const wsId = useWorkspaceId();
@@ -88,6 +127,27 @@ export default function CommandDeckPage() {
   const runs: CommandRun[] = runsData?.command_runs ?? [];
   const runtimes = runtimesData ?? [];
   const previews: PreviewRegistryEntry[] = previewsData?.previews ?? [];
+
+  useWSEvent("command_run:updated", (payload) => {
+    if (!isCommandRunUpdatedPayload(payload)) {
+      return;
+    }
+    const incoming = payload.run;
+    queryClient.setQueryData<CommandRunListResponse>(
+      ["commanddeck", "runs", wsId],
+      (current) => {
+        if (!current) {
+          return { command_runs: [incoming], total: 1 };
+        }
+        const withoutIncoming = current.command_runs.filter((run) => run.id !== incoming.id);
+        const nextRuns = [incoming, ...withoutIncoming];
+        return {
+          command_runs: nextRuns,
+          total: nextRuns.length,
+        };
+      },
+    );
+  });
 
   const handleRun = () => {
     if (!selectedRuntimeId) {

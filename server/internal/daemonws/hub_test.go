@@ -188,6 +188,101 @@ func TestDeliverDaemonRuntimeRelaysCommandRunExecute(t *testing.T) {
 	}
 }
 
+func TestDeliverDaemonRuntimeRelaysCommandRunCancel(t *testing.T) {
+	M.Reset()
+	defer M.Reset()
+
+	hub := NewHub()
+	client := attachDaemonTestClient(hub, "runtime-1")
+
+	frame, err := json.Marshal(protocol.Message{
+		Type: protocol.CommandRunCancel,
+		Payload: mustMarshalRaw(protocol.CommandRunCancelPayload{
+			CommandRunID: "run-1",
+			RuntimeID:    "runtime-1",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("marshal command run cancel frame: %v", err)
+	}
+
+	hub.DeliverDaemonRuntime("runtime-1", frame, "")
+
+	select {
+	case got := <-client.send:
+		var msg protocol.Message
+		if err := json.Unmarshal(got, &msg); err != nil {
+			t.Fatalf("unmarshal delivered frame: %v", err)
+		}
+		if msg.Type != protocol.CommandRunCancel {
+			t.Fatalf("message type = %q, want %q", msg.Type, protocol.CommandRunCancel)
+		}
+		var payload protocol.CommandRunCancelPayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+			t.Fatalf("unmarshal command run payload: %v", err)
+		}
+		if payload.CommandRunID != "run-1" || payload.RuntimeID != "runtime-1" {
+			t.Fatalf("payload = %+v, want command run cancel payload", payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected command_run:cancel frame to be delivered")
+	}
+}
+
+func TestCommandRunStartedHandlerInvoked(t *testing.T) {
+	M.Reset()
+	defer M.Reset()
+
+	hub := NewHub()
+	called := make(chan protocol.CommandRunStartedPayload, 1)
+	hub.SetCommandRunStartedHandler(func(_ context.Context, _ ClientIdentity, _ string, payload json.RawMessage) error {
+		var started protocol.CommandRunStartedPayload
+		if err := json.Unmarshal(payload, &started); err != nil {
+			return err
+		}
+		called <- started
+		return nil
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hub.HandleWebSocket(w, r, ClientIdentity{
+			WorkspaceID: "ws-1",
+			RuntimeIDs:  []string{"runtime-1"},
+		})
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer conn.Close()
+
+	startedFrame, err := json.Marshal(protocol.Message{
+		Type: protocol.CommandRunStarted,
+		Payload: mustMarshalRaw(protocol.CommandRunStartedPayload{
+			CommandRunID: "run-started-1",
+			Status:       "running",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("marshal command_run:started: %v", err)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, startedFrame); err != nil {
+		t.Fatalf("WriteMessage: %v", err)
+	}
+
+	select {
+	case got := <-called:
+		if got.CommandRunID != "run-started-1" || got.Status != "running" {
+			t.Fatalf("unexpected payload: %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected command_run:started handler to be invoked")
+	}
+}
+
 // TestHeartbeatRoundTrip pins the WS heartbeat contract: a daemon:heartbeat
 // frame invokes the registered HeartbeatHandler with the runtime ID, and the
 // hub serializes the returned ack as a daemon:heartbeat_ack on the wire.

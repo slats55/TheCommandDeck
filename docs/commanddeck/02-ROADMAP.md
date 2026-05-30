@@ -90,13 +90,22 @@ Completed:
   - branch/commit: `feature/commanddeck-command-run-safe-cancellation-016` / `d8fcee768ea86c10e068e19df6b9669d05b647e4` (merged)
   - acceptance gate: focused Codex acceptance gate passed, including race/leak correction
   - release track: `R0.1`
-
-Pending gate:
-- `COMMANDDECK-CONTROL-PLANE-COMMERCIAL-SPRINT-017` (`feature/commanddeck-command-run-structured-evidence-017`)
+- `COMMANDDECK-CONTROL-PLANE-COMMERCIAL-SPRINT-017`
   - objective: structured truncation and cancellation-request evidence persistence/API/UI
-  - dependencies: `015`, `016`
-  - acceptance gate: focused product gate with migration/sqlc/backend/frontend verification
+  - branch/commit: `feature/commanddeck-command-run-structured-evidence-017` / `a7e4a3b773fc073fbf012031ba8b384765a62312` (merged)
+  - acceptance gate: `CODEX_AUTHORIZED_ACCEPTANCE_GATE` passed (migration/sqlc/backend/frontend/full-suite/build/health)
   - release track: `R0.1`
+- `COMMANDDECK-COMMAND-RUN-LIVE-EVENTS-018`
+  - objective: workspace-scoped live command-run lifecycle events into CommandDeck UI with safe fallback polling
+  - branch/commit: `feature/commanddeck-command-run-live-events-018` / `PENDING_MERGE`
+  - acceptance gate: `CODEX_AUTHORIZED_ACCEPTANCE_GATE` in progress on branch
+  - release track: `R0.1`
+
+Next selected slice:
+- `COMMANDDECK-RUNTIME-HEALTH-HEARTBEAT-OFFLINE-019`
+  - objective: truthful runtime heartbeat/offline status board (workspace-scoped)
+  - dependency: merge and verify `018`
+  - release track: `R0.2`
 
 Backlog candidates:
 - command-run live events stream + richer operator history filtering (`R0.1`)

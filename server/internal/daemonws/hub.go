@@ -75,6 +75,9 @@ type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtime
 // It receives the runtimeID that the daemon authenticated with, and the payload.
 type CommandRunHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, payload json.RawMessage) error
 
+// CommandRunStartedHandler processes a command_run:started frame sent from daemon to server.
+type CommandRunStartedHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, payload json.RawMessage) error
+
 // Hub keeps daemon WebSocket connections indexed by runtime ID. Messages are
 // best-effort wakeup hints; the daemon still uses HTTP claim for correctness.
 type Hub struct {
@@ -87,6 +90,7 @@ type Hub struct {
 	hbMu         sync.RWMutex
 	onHeartbeat  HeartbeatHandler
 	onCommandRun CommandRunHandler
+	onRunStarted CommandRunStartedHandler
 }
 
 func NewHub() *Hub {
@@ -139,6 +143,23 @@ func (h *Hub) commandRunHandler() CommandRunHandler {
 	h.hbMu.RLock()
 	defer h.hbMu.RUnlock()
 	return h.onCommandRun
+}
+
+// SetCommandRunStartedHandler installs the callback used for command_run:started frames
+// sent from daemon to server over the WebSocket connection.
+func (h *Hub) SetCommandRunStartedHandler(fn CommandRunStartedHandler) {
+	if h == nil {
+		return
+	}
+	h.hbMu.Lock()
+	h.onRunStarted = fn
+	h.hbMu.Unlock()
+}
+
+func (h *Hub) commandRunStartedHandler() CommandRunStartedHandler {
+	h.hbMu.RLock()
+	defer h.hbMu.RUnlock()
+	return h.onRunStarted
 }
 
 func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request, identity ClientIdentity) {
@@ -235,6 +256,12 @@ func runtimeIDFromDaemonRuntimeFrame(msg protocol.Message) (string, bool) {
 		return payload.RuntimeID, true
 	case protocol.CommandRunExecute:
 		var payload protocol.CommandRunExecutePayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" {
+			return "", false
+		}
+		return payload.RuntimeID, true
+	case protocol.CommandRunCancel:
+		var payload protocol.CommandRunCancelPayload
 		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" {
 			return "", false
 		}
@@ -386,11 +413,38 @@ func (c *client) handleFrame(raw []byte) {
 	switch msg.Type {
 	case protocol.EventDaemonHeartbeat:
 		c.handleHeartbeatFrame(msg.Payload)
+	case protocol.CommandRunStarted:
+		c.handleCommandRunStartedFrame(msg.Payload)
 	case protocol.CommandRunResult:
 		c.handleCommandRunFrame(msg.Payload)
 	default:
 		// Unknown app messages are intentionally ignored for forward
 		// compatibility with future daemon → server message types.
+	}
+}
+
+// handleCommandRunStartedFrame processes an inbound command_run:started from the daemon
+// and invokes the hub's handler if configured.
+func (c *client) handleCommandRunStartedFrame(raw json.RawMessage) {
+	handler := c.hub.commandRunStartedHandler()
+	if handler == nil {
+		slog.Debug("daemon websocket command_run:started handler not set", "daemon_id", c.identity.DaemonID)
+		return
+	}
+	var startedPayload protocol.CommandRunStartedPayload
+	if err := json.Unmarshal(raw, &startedPayload); err != nil {
+		slog.Debug("command_run:started invalid payload", "error", err, "daemon_id", c.identity.DaemonID)
+		return
+	}
+	if startedPayload.CommandRunID == "" {
+		slog.Debug("command_run:started missing command_run_id", "daemon_id", c.identity.DaemonID)
+		return
+	}
+	if err := handler(context.Background(), c.identity, "", raw); err != nil {
+		slog.Warn("daemon websocket command_run:started handler failed",
+			"error", err,
+			"daemon_id", c.identity.DaemonID,
+			"command_run_id", startedPayload.CommandRunID)
 	}
 }
 

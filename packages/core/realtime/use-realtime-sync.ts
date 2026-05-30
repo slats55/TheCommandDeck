@@ -162,6 +162,10 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: githubKeys.installations(wsId) });
       },
+      command_run: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: ["commanddeck", "runs", wsId] });
+      },
       pull_request: () => {
         // PR list is keyed by issue id, not workspace, so we invalidate all
         // PR queries — the open issue detail page will refetch its own list.
@@ -761,6 +765,7 @@ export function useRealtimeSync(
           qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
           qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
           qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
+          qc.invalidateQueries({ queryKey: ["commanddeck", "runs", wsId] });
         }
         qc.invalidateQueries({ queryKey: workspaceKeys.list() });
       } catch (e) {

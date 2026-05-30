@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
@@ -15,12 +15,24 @@ const { apiMock } = vi.hoisted(() => ({
   },
 }));
 
+const { wsHandlers } = vi.hoisted(() => ({
+  wsHandlers: new Map<string, ((payload: unknown, actorId?: string) => void)[]>(),
+}));
+
 vi.mock("@multica/core/api", () => ({
   api: apiMock,
 }));
 
 vi.mock("@multica/core", () => ({
   useWorkspaceId: () => "workspace-1",
+}));
+
+vi.mock("@multica/core/realtime", () => ({
+  useWSEvent: (event: string, handler: (payload: unknown, actorId?: string) => void) => {
+    const handlers = wsHandlers.get(event) ?? [];
+    handlers.push(handler);
+    wsHandlers.set(event, handlers);
+  },
 }));
 
 import CommandDeckPage from "./page";
@@ -40,6 +52,7 @@ function createWrapper() {
 describe("CommandDeckPage Preview Registry", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    wsHandlers.clear();
     apiMock.listCommandTemplates.mockResolvedValue({ templates: [] });
     apiMock.listRuntimes.mockResolvedValue([]);
     apiMock.listCommandRuns.mockResolvedValue({ command_runs: [], total: 0 });
@@ -48,6 +61,13 @@ describe("CommandDeckPage Preview Registry", () => {
       last_checked_at: "2026-05-29T00:00:00Z",
     });
   });
+
+  const emitCommandRunUpdated = (payload: unknown) => {
+    const handlers = wsHandlers.get("command_run:updated") ?? [];
+    for (const handler of handlers) {
+      handler(payload);
+    }
+  };
 
   it("shows cancel control only for active runs and sends run-scoped cancellation", async () => {
     apiMock.listCommandRuns.mockResolvedValueOnce({
@@ -84,6 +104,69 @@ describe("CommandDeckPage Preview Registry", () => {
       expect(apiMock.cancelCommandRun).toHaveBeenCalledWith("run-1");
     });
     expect(screen.getByText("Cancellation requested.")).toBeInTheDocument();
+  });
+
+  it("applies live command_run:updated events to run history without polling", async () => {
+    apiMock.listCommandRuns.mockResolvedValueOnce({
+      command_runs: [
+        {
+          id: "run-live-1",
+          status: "pending",
+          command: "git status",
+          working_directory: "/tmp/ws",
+          stdout_truncated: false,
+          stderr_truncated: false,
+          created_at: "2026-05-29T00:00:00Z",
+        },
+      ],
+      total: 1,
+    });
+
+    render(<CommandDeckPage />, { wrapper: createWrapper() });
+    expect(await screen.findByText("Pending")).toBeInTheDocument();
+
+    act(() => {
+      emitCommandRunUpdated({
+        run: {
+          id: "run-live-1",
+          status: "running",
+          command: "git status",
+          working_directory: "/tmp/ws",
+          stdout_truncated: false,
+          stderr_truncated: false,
+          created_at: "2026-05-29T00:00:00Z",
+        },
+      });
+    });
+
+    expect(await screen.findByText("Running")).toBeInTheDocument();
+  });
+
+  it("ignores malformed command_run:updated payloads", async () => {
+    apiMock.listCommandRuns.mockResolvedValueOnce({
+      command_runs: [
+        {
+          id: "run-live-2",
+          status: "pending",
+          command: "git status",
+          working_directory: "/tmp/ws",
+          stdout_truncated: false,
+          stderr_truncated: false,
+          created_at: "2026-05-29T00:00:00Z",
+        },
+      ],
+      total: 1,
+    });
+
+    render(<CommandDeckPage />, { wrapper: createWrapper() });
+    expect(await screen.findByText("Pending")).toBeInTheDocument();
+
+    act(() => {
+      emitCommandRunUpdated({ run: { id: "run-live-2", status: 42 } });
+    });
+
+    expect(screen.queryByText("Running")).not.toBeInTheDocument();
+    expect(screen.getByText("Pending")).toBeInTheDocument();
   });
 
   it("shows real preview URL and healthy state from the API response", async () => {

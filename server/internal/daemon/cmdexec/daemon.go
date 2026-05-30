@@ -111,6 +111,7 @@ func (h *WebSocketHandler) HandleCancel(rawPayload json.RawMessage) {
 }
 
 func (h *WebSocketHandler) executeRun(runCtx context.Context, execPayload CommandRunExecutePayload, workingDir string) {
+	h.sendStarted(execPayload.CommandRunID)
 	result := h.executor.Execute(runCtx, execPayload.Command, workingDir)
 	if runCtx.Err() == context.Canceled && result.Status != "timeout" {
 		result.Status = "cancelled"
@@ -132,6 +133,25 @@ func (h *WebSocketHandler) executeRun(runCtx context.Context, execPayload Comman
 		StderrTruncated: result.StderrTruncated,
 		DurationMs:      result.DurationMs,
 	})
+}
+
+func (h *WebSocketHandler) sendStarted(commandRunID string) {
+	frame, err := json.Marshal(protocol.Message{
+		Type: protocol.CommandRunStarted,
+		Payload: mustMarshal(protocol.CommandRunStartedPayload{
+			CommandRunID: commandRunID,
+			Status:       "running",
+		}),
+	})
+	if err != nil {
+		h.logger.Debug("command_run:started: failed to marshal", "error", err)
+		return
+	}
+	select {
+	case h.send <- frame:
+	default:
+		h.logger.Debug("command_run:started: send buffer full, dropping event", "command_run_id", commandRunID)
+	}
 }
 
 func (h *WebSocketHandler) sendResult(resultPayload CommandRunResultPayload) {
