@@ -51,6 +51,13 @@ export default function CommandDeckPage() {
     refetchInterval: 15000,
   });
 
+  const previewSyncMutation = useMutation({
+    mutationFn: () => api.syncSelfHostedPreviewRegistry(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["commanddeck", "previews", wsId] });
+    },
+  });
+
   // Execute command mutation
   const runMutation = useMutation({
     mutationFn: () =>
@@ -142,11 +149,20 @@ export default function CommandDeckPage() {
       <div className="rounded-lg border bg-card p-6 space-y-4">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-lg font-medium">Preview Registry</h2>
-          {previewsData?.last_checked_at && (
-            <span className="text-xs text-muted-foreground">
-              Checked {new Date(previewsData.last_checked_at).toLocaleTimeString()}
-            </span>
-          )}
+          <div className="flex items-center gap-3">
+            {previewsData?.last_checked_at && (
+              <span className="text-xs text-muted-foreground">
+                Checked {new Date(previewsData.last_checked_at).toLocaleTimeString()}
+              </span>
+            )}
+            <button
+              className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50"
+              disabled={previewSyncMutation.isPending}
+              onClick={() => previewSyncMutation.mutate()}
+            >
+              {previewSyncMutation.isPending ? "Refreshing..." : "Register/Refresh Preview"}
+            </button>
+          </div>
         </div>
 
         {previewsLoading ? (
@@ -191,9 +207,17 @@ export default function CommandDeckPage() {
                     <dd className="font-mono">{preview.port || "-"}</dd>
                   </div>
                   <div>
+                    <dt className="text-xs uppercase text-muted-foreground">Registered</dt>
+                    <dd>
+                      {preview.registered_at
+                        ? new Date(preview.registered_at).toLocaleString()
+                        : "-"}
+                    </dd>
+                  </div>
+                  <div>
                     <dt className="text-xs uppercase text-muted-foreground">Runtime</dt>
                     <dd>
-                      {preview.runtime_name ?? preview.runtime_id ?? "No runtime registered"}
+                      {preview.runtime_name ?? preview.runtime_id ?? "Unlinked (self-hosted preview)"}
                       {preview.runtime_status && (
                         <span className="ml-2 text-muted-foreground">
                           ({preview.runtime_status})
@@ -204,6 +228,22 @@ export default function CommandDeckPage() {
                   <div>
                     <dt className="text-xs uppercase text-muted-foreground">Machine</dt>
                     <dd className="break-all">{preview.machine_identity ?? "-"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs uppercase text-muted-foreground">Last Checked</dt>
+                    <dd>
+                      {preview.last_checked_at
+                        ? new Date(preview.last_checked_at).toLocaleString()
+                        : "-"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs uppercase text-muted-foreground">Last Successful Check</dt>
+                    <dd>
+                      {preview.last_success_at
+                        ? new Date(preview.last_success_at).toLocaleString()
+                        : "-"}
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-xs uppercase text-muted-foreground">Command</dt>

@@ -460,6 +460,22 @@ type PinnedItem struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type PreviewRegistry struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	RuntimeID     pgtype.UUID        `json:"runtime_id"`
+	CommandRunID  pgtype.UUID        `json:"command_run_id"`
+	Name          string             `json:"name"`
+	PreviewUrl    string             `json:"preview_url"`
+	Port          int32              `json:"port"`
+	Source        string             `json:"source"`
+	Status        string             `json:"status"`
+	LastCheckedAt pgtype.Timestamptz `json:"last_checked_at"`
+	LastSuccessAt pgtype.Timestamptz `json:"last_success_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Project struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
