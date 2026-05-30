@@ -207,25 +207,30 @@ type CommandLedger struct {
 }
 
 type CommandRun struct {
-	ID               pgtype.UUID        `json:"id"`
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
-	TemplateID       pgtype.UUID        `json:"template_id"`
-	RuntimeID        pgtype.UUID        `json:"runtime_id"`
-	IssueID          pgtype.UUID        `json:"issue_id"`
-	Command          string             `json:"command"`
-	Arguments        []string           `json:"arguments"`
-	WorkingDirectory string             `json:"working_directory"`
-	Status           string             `json:"status"`
-	ExitCode         pgtype.Int4        `json:"exit_code"`
-	Stdout           pgtype.Text        `json:"stdout"`
-	Stderr           pgtype.Text        `json:"stderr"`
-	FullLogPath      pgtype.Text        `json:"full_log_path"`
-	StartedAt        pgtype.Timestamptz `json:"started_at"`
-	FinishedAt       pgtype.Timestamptz `json:"finished_at"`
-	DurationMs       pgtype.Int4        `json:"duration_ms"`
-	InitiatorType    string             `json:"initiator_type"`
-	InitiatorID      pgtype.UUID        `json:"initiator_id"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	ID                          pgtype.UUID        `json:"id"`
+	WorkspaceID                 pgtype.UUID        `json:"workspace_id"`
+	TemplateID                  pgtype.UUID        `json:"template_id"`
+	RuntimeID                   pgtype.UUID        `json:"runtime_id"`
+	IssueID                     pgtype.UUID        `json:"issue_id"`
+	Command                     string             `json:"command"`
+	Arguments                   []string           `json:"arguments"`
+	WorkingDirectory            string             `json:"working_directory"`
+	Status                      string             `json:"status"`
+	ExitCode                    pgtype.Int4        `json:"exit_code"`
+	Stdout                      pgtype.Text        `json:"stdout"`
+	Stderr                      pgtype.Text        `json:"stderr"`
+	FullLogPath                 pgtype.Text        `json:"full_log_path"`
+	StartedAt                   pgtype.Timestamptz `json:"started_at"`
+	FinishedAt                  pgtype.Timestamptz `json:"finished_at"`
+	DurationMs                  pgtype.Int4        `json:"duration_ms"`
+	InitiatorType               string             `json:"initiator_type"`
+	InitiatorID                 pgtype.UUID        `json:"initiator_id"`
+	CreatedAt                   pgtype.Timestamptz `json:"created_at"`
+	StdoutTruncated             bool               `json:"stdout_truncated"`
+	StderrTruncated             bool               `json:"stderr_truncated"`
+	CancellationRequestedAt     pgtype.Timestamptz `json:"cancellation_requested_at"`
+	CancellationRequestedByType pgtype.Text        `json:"cancellation_requested_by_type"`
+	CancellationRequestedByID   pgtype.UUID        `json:"cancellation_requested_by_id"`
 }
 
 type CommandTemplate struct {

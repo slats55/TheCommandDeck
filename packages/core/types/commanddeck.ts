@@ -17,6 +17,11 @@ export interface CommandRun {
   exit_code?: number;
   stdout?: string;
   stderr?: string;
+  stdout_truncated: boolean;
+  stderr_truncated: boolean;
+  cancellation_requested_at?: string;
+  cancellation_requested_by_type?: string;
+  cancellation_requested_by_id?: string;
   duration_ms?: number;
   started_at?: string;
   finished_at?: string;

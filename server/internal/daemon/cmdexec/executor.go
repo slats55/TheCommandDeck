@@ -64,12 +64,14 @@ func NewExecutor(workspacesRoot string) *Executor {
 
 // Result holds the outcome of a command execution.
 type Result struct {
-	Status     string // "completed", "failed", "timeout"
-	ExitCode   int
-	Stdout     string
-	Stderr     string
-	DurationMs int
-	WorkingDir string
+	Status          string // "completed", "failed", "timeout"
+	ExitCode        int
+	Stdout          string
+	Stderr          string
+	StdoutTruncated bool
+	StderrTruncated bool
+	DurationMs      int
+	WorkingDir      string
 }
 
 // Execute runs the given command in the specified working directory,
@@ -173,12 +175,14 @@ func (e *Executor) Execute(ctx context.Context, command string, workingDir strin
 	}
 
 	return Result{
-		Status:     status,
-		ExitCode:   exitCode,
-		Stdout:     stdout,
-		Stderr:     stderr,
-		DurationMs: int(time.Since(start).Milliseconds()),
-		WorkingDir: workingDir,
+		Status:          status,
+		ExitCode:        exitCode,
+		Stdout:          stdout,
+		Stderr:          stderr,
+		StdoutTruncated: stdoutTruncated,
+		StderrTruncated: stderrTruncated,
+		DurationMs:      int(time.Since(start).Milliseconds()),
+		WorkingDir:      workingDir,
 	}
 }
 

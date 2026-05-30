@@ -28,6 +28,17 @@ SET
     stderr = $5,
     finished_at = $6,
     duration_ms = $7,
-    started_at = $8
+    started_at = $8,
+    stdout_truncated = $9,
+    stderr_truncated = $10
+WHERE id = $1
+RETURNING *;
+
+-- name: MarkCommandRunCancellationRequested :one
+UPDATE command_run
+SET
+    cancellation_requested_at = now(),
+    cancellation_requested_by_type = $2,
+    cancellation_requested_by_id = $3
 WHERE id = $1
 RETURNING *;

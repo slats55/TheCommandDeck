@@ -434,6 +434,14 @@ export default function CommandDeckPage() {
                         : run.stderr
                           ? `ERR: ${run.stderr.slice(0, 80)}`
                           : "—"}
+                      {(run.stdout_truncated || run.stderr_truncated) && (
+                        <span className="ml-2 text-amber-600">truncated</span>
+                      )}
+                      {run.cancellation_requested_at && (
+                        <span className="ml-2 text-muted-foreground">
+                          cancel requested {new Date(run.cancellation_requested_at).toLocaleTimeString()}
+                        </span>
+                      )}
                     </td>
                     <td className="py-2">
                       {(run.status === "pending" || run.status === "running") ? (

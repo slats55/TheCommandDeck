@@ -21,7 +21,7 @@ INSERT INTO command_run (
     $5, $6, $7, $8,
     $9, $10
 )
-RETURNING id, workspace_id, template_id, runtime_id, issue_id, command, arguments, working_directory, status, exit_code, stdout, stderr, full_log_path, started_at, finished_at, duration_ms, initiator_type, initiator_id, created_at
+RETURNING id, workspace_id, template_id, runtime_id, issue_id, command, arguments, working_directory, status, exit_code, stdout, stderr, full_log_path, started_at, finished_at, duration_ms, initiator_type, initiator_id, created_at, stdout_truncated, stderr_truncated, cancellation_requested_at, cancellation_requested_by_type, cancellation_requested_by_id
 `
 
 type CreateCommandRunParams struct {
@@ -71,12 +71,17 @@ func (q *Queries) CreateCommandRun(ctx context.Context, arg CreateCommandRunPara
 		&i.InitiatorType,
 		&i.InitiatorID,
 		&i.CreatedAt,
+		&i.StdoutTruncated,
+		&i.StderrTruncated,
+		&i.CancellationRequestedAt,
+		&i.CancellationRequestedByType,
+		&i.CancellationRequestedByID,
 	)
 	return i, err
 }
 
 const getCommandRun = `-- name: GetCommandRun :one
-SELECT id, workspace_id, template_id, runtime_id, issue_id, command, arguments, working_directory, status, exit_code, stdout, stderr, full_log_path, started_at, finished_at, duration_ms, initiator_type, initiator_id, created_at FROM command_run WHERE id = $1
+SELECT id, workspace_id, template_id, runtime_id, issue_id, command, arguments, working_directory, status, exit_code, stdout, stderr, full_log_path, started_at, finished_at, duration_ms, initiator_type, initiator_id, created_at, stdout_truncated, stderr_truncated, cancellation_requested_at, cancellation_requested_by_type, cancellation_requested_by_id FROM command_run WHERE id = $1
 `
 
 func (q *Queries) GetCommandRun(ctx context.Context, id pgtype.UUID) (CommandRun, error) {
@@ -102,12 +107,17 @@ func (q *Queries) GetCommandRun(ctx context.Context, id pgtype.UUID) (CommandRun
 		&i.InitiatorType,
 		&i.InitiatorID,
 		&i.CreatedAt,
+		&i.StdoutTruncated,
+		&i.StderrTruncated,
+		&i.CancellationRequestedAt,
+		&i.CancellationRequestedByType,
+		&i.CancellationRequestedByID,
 	)
 	return i, err
 }
 
 const listCommandRuns = `-- name: ListCommandRuns :many
-SELECT id, workspace_id, template_id, runtime_id, issue_id, command, arguments, working_directory, status, exit_code, stdout, stderr, full_log_path, started_at, finished_at, duration_ms, initiator_type, initiator_id, created_at FROM command_run
+SELECT id, workspace_id, template_id, runtime_id, issue_id, command, arguments, working_directory, status, exit_code, stdout, stderr, full_log_path, started_at, finished_at, duration_ms, initiator_type, initiator_id, created_at, stdout_truncated, stderr_truncated, cancellation_requested_at, cancellation_requested_by_type, cancellation_requested_by_id FROM command_run
 WHERE workspace_id = $1
 ORDER BY created_at DESC
 LIMIT 50
@@ -142,6 +152,11 @@ func (q *Queries) ListCommandRuns(ctx context.Context, workspaceID pgtype.UUID) 
 			&i.InitiatorType,
 			&i.InitiatorID,
 			&i.CreatedAt,
+			&i.StdoutTruncated,
+			&i.StderrTruncated,
+			&i.CancellationRequestedAt,
+			&i.CancellationRequestedByType,
+			&i.CancellationRequestedByID,
 		); err != nil {
 			return nil, err
 		}
@@ -153,6 +168,54 @@ func (q *Queries) ListCommandRuns(ctx context.Context, workspaceID pgtype.UUID) 
 	return items, nil
 }
 
+const markCommandRunCancellationRequested = `-- name: MarkCommandRunCancellationRequested :one
+UPDATE command_run
+SET
+    cancellation_requested_at = now(),
+    cancellation_requested_by_type = $2,
+    cancellation_requested_by_id = $3
+WHERE id = $1
+RETURNING id, workspace_id, template_id, runtime_id, issue_id, command, arguments, working_directory, status, exit_code, stdout, stderr, full_log_path, started_at, finished_at, duration_ms, initiator_type, initiator_id, created_at, stdout_truncated, stderr_truncated, cancellation_requested_at, cancellation_requested_by_type, cancellation_requested_by_id
+`
+
+type MarkCommandRunCancellationRequestedParams struct {
+	ID                          pgtype.UUID `json:"id"`
+	CancellationRequestedByType pgtype.Text `json:"cancellation_requested_by_type"`
+	CancellationRequestedByID   pgtype.UUID `json:"cancellation_requested_by_id"`
+}
+
+func (q *Queries) MarkCommandRunCancellationRequested(ctx context.Context, arg MarkCommandRunCancellationRequestedParams) (CommandRun, error) {
+	row := q.db.QueryRow(ctx, markCommandRunCancellationRequested, arg.ID, arg.CancellationRequestedByType, arg.CancellationRequestedByID)
+	var i CommandRun
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.TemplateID,
+		&i.RuntimeID,
+		&i.IssueID,
+		&i.Command,
+		&i.Arguments,
+		&i.WorkingDirectory,
+		&i.Status,
+		&i.ExitCode,
+		&i.Stdout,
+		&i.Stderr,
+		&i.FullLogPath,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.DurationMs,
+		&i.InitiatorType,
+		&i.InitiatorID,
+		&i.CreatedAt,
+		&i.StdoutTruncated,
+		&i.StderrTruncated,
+		&i.CancellationRequestedAt,
+		&i.CancellationRequestedByType,
+		&i.CancellationRequestedByID,
+	)
+	return i, err
+}
+
 const updateCommandRunResult = `-- name: UpdateCommandRunResult :one
 UPDATE command_run
 SET
@@ -162,20 +225,24 @@ SET
     stderr = $5,
     finished_at = $6,
     duration_ms = $7,
-    started_at = $8
+    started_at = $8,
+    stdout_truncated = $9,
+    stderr_truncated = $10
 WHERE id = $1
-RETURNING id, workspace_id, template_id, runtime_id, issue_id, command, arguments, working_directory, status, exit_code, stdout, stderr, full_log_path, started_at, finished_at, duration_ms, initiator_type, initiator_id, created_at
+RETURNING id, workspace_id, template_id, runtime_id, issue_id, command, arguments, working_directory, status, exit_code, stdout, stderr, full_log_path, started_at, finished_at, duration_ms, initiator_type, initiator_id, created_at, stdout_truncated, stderr_truncated, cancellation_requested_at, cancellation_requested_by_type, cancellation_requested_by_id
 `
 
 type UpdateCommandRunResultParams struct {
-	ID         pgtype.UUID        `json:"id"`
-	Status     string             `json:"status"`
-	ExitCode   pgtype.Int4        `json:"exit_code"`
-	Stdout     pgtype.Text        `json:"stdout"`
-	Stderr     pgtype.Text        `json:"stderr"`
-	FinishedAt pgtype.Timestamptz `json:"finished_at"`
-	DurationMs pgtype.Int4        `json:"duration_ms"`
-	StartedAt  pgtype.Timestamptz `json:"started_at"`
+	ID              pgtype.UUID        `json:"id"`
+	Status          string             `json:"status"`
+	ExitCode        pgtype.Int4        `json:"exit_code"`
+	Stdout          pgtype.Text        `json:"stdout"`
+	Stderr          pgtype.Text        `json:"stderr"`
+	FinishedAt      pgtype.Timestamptz `json:"finished_at"`
+	DurationMs      pgtype.Int4        `json:"duration_ms"`
+	StartedAt       pgtype.Timestamptz `json:"started_at"`
+	StdoutTruncated bool               `json:"stdout_truncated"`
+	StderrTruncated bool               `json:"stderr_truncated"`
 }
 
 func (q *Queries) UpdateCommandRunResult(ctx context.Context, arg UpdateCommandRunResultParams) (CommandRun, error) {
@@ -188,6 +255,8 @@ func (q *Queries) UpdateCommandRunResult(ctx context.Context, arg UpdateCommandR
 		arg.FinishedAt,
 		arg.DurationMs,
 		arg.StartedAt,
+		arg.StdoutTruncated,
+		arg.StderrTruncated,
 	)
 	var i CommandRun
 	err := row.Scan(
@@ -210,6 +279,11 @@ func (q *Queries) UpdateCommandRunResult(ctx context.Context, arg UpdateCommandR
 		&i.InitiatorType,
 		&i.InitiatorID,
 		&i.CreatedAt,
+		&i.StdoutTruncated,
+		&i.StderrTruncated,
+		&i.CancellationRequestedAt,
+		&i.CancellationRequestedByType,
+		&i.CancellationRequestedByID,
 	)
 	return i, err
 }
