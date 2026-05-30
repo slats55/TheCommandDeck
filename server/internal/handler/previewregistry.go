@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -57,6 +59,13 @@ type previewTarget struct {
 	PublicURL string
 	CheckURLs []string
 	Port      int
+}
+
+type runtimePreviewReportRequest struct {
+	PreviewURL   string `json:"preview_url"`
+	Name         string `json:"name"`
+	RuntimeID    string `json:"runtime_id,omitempty"`
+	CommandRunID string `json:"command_run_id,omitempty"`
 }
 
 const (
@@ -146,6 +155,133 @@ func (h *Handler) HandleCommandDeckPreviewSelfHostedSync(w http.ResponseWriter, 
 		return
 	}
 	checkedAt := healthCheckedAt.Format(time.RFC3339)
+	for i := range entries {
+		if entries[i].PreviewURL == target.PublicURL && entries[i].Source == "self_hosted_stack" {
+			entries[i].HealthStatusCode = health.StatusCode
+			entries[i].HealthMessage = health.PublicMessage
+			entries[i].LastCheckedAt = checkedAt
+			if health.Status == previewHealthStatusHealthy {
+				entries[i].LastSuccessAt = &checkedAt
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, previewRegistryResponse{
+		Previews:      entries,
+		LastCheckedAt: checkedAt,
+	})
+}
+
+// ReportRuntimePreview allows a daemon-authenticated runtime to report a
+// trusted preview URL. Runtime provenance is always derived server-side from
+// the authenticated daemon/runtime context. Command provenance is not assigned
+// by this endpoint.
+func (h *Handler) ReportRuntimePreview(w http.ResponseWriter, r *http.Request) {
+	if middleware.DaemonAuthPathFromContext(r.Context()) != middleware.DaemonAuthPathDaemonToken {
+		writeError(w, http.StatusForbidden, "daemon token required")
+		return
+	}
+
+	daemonID := strings.TrimSpace(middleware.DaemonIDFromContext(r.Context()))
+	if daemonID == "" {
+		writeError(w, http.StatusForbidden, "daemon token required")
+		return
+	}
+
+	runtimeID := workspaceIDFromURL(r, "runtimeId")
+	if runtimeID == "" {
+		writeError(w, http.StatusBadRequest, "runtime_id is required")
+		return
+	}
+
+	runtime, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
+	if !ok {
+		return
+	}
+
+	if !runtime.DaemonID.Valid || strings.TrimSpace(runtime.DaemonID.String) == "" {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(runtime.DaemonID.String), daemonID) {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+
+	var req runtimePreviewReportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if strings.TrimSpace(req.PreviewURL) == "" {
+		writeError(w, http.StatusBadRequest, "preview_url is required")
+		return
+	}
+	if strings.TrimSpace(req.RuntimeID) != "" && strings.TrimSpace(req.RuntimeID) != runtimeID {
+		writeError(w, http.StatusBadRequest, "runtime_id mismatch")
+		return
+	}
+
+	target, err := validatePreviewTarget(req.PreviewURL)
+	if err != nil {
+		slog.Warn("runtime preview target rejected", "runtime_id", runtimeID, "error", err)
+		writeError(w, http.StatusBadRequest, "trusted preview target is unavailable")
+		return
+	}
+
+	checkedAtTime := time.Now().UTC()
+	health := probePreviewHealth(r.Context(), target)
+	var lastSuccessAt pgtype.Timestamptz
+	if health.Status == previewHealthStatusHealthy {
+		lastSuccessAt = pgtype.Timestamptz{Time: checkedAtTime, Valid: true}
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = strings.TrimSpace(runtime.Name)
+		if name == "" {
+			name = "Runtime preview"
+		}
+	}
+
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !ok {
+		return
+	}
+
+	_, err = h.Queries.UpsertPreviewRegistryRecord(r.Context(), db.UpsertPreviewRegistryRecordParams{
+		WorkspaceID:   runtime.WorkspaceID,
+		RuntimeID:     runtimeUUID,
+		CommandRunID:  pgtype.UUID{},
+		Name:          name,
+		PreviewUrl:    target.PublicURL,
+		Port:          int32(target.Port),
+		Source:        "self_hosted_stack",
+		Status:        health.Status,
+		LastCheckedAt: pgtype.Timestamptz{Time: checkedAtTime, Valid: true},
+		LastSuccessAt: lastSuccessAt,
+	})
+	if err != nil {
+		slog.Error("upsert runtime preview record failed", "runtime_id", runtimeID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to refresh preview registry")
+		return
+	}
+
+	workspaceID := uuidToString(runtime.WorkspaceID)
+	workspace, err := h.Queries.GetWorkspace(r.Context(), runtime.WorkspaceID)
+	if err != nil {
+		slog.Error("load workspace for runtime preview response failed", "runtime_id", runtimeID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list preview registry")
+		return
+	}
+	entries, _, err := h.listPreviewRegistryEntries(r.Context(), runtime.WorkspaceID, workspaceID, workspace.Name, workspace.Slug)
+	if err != nil {
+		slog.Error("list preview registry records failed", "runtime_id", runtimeID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list preview registry")
+		return
+	}
+
+	checkedAt := checkedAtTime.Format(time.RFC3339)
 	for i := range entries {
 		if entries[i].PreviewURL == target.PublicURL && entries[i].Source == "self_hosted_stack" {
 			entries[i].HealthStatusCode = health.StatusCode
