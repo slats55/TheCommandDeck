@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Attachment, ListIssuesResponse, TimelineEntry } from "../types";
+import type { Attachment, ListIssuesResponse, PreviewRegistryResponse, TimelineEntry } from "../types";
 
 // ---------------------------------------------------------------------------
 // Schemas for the highest-risk API endpoints — those whose responses drive
@@ -154,6 +154,39 @@ export const ListIssuesResponseSchema = z.object({
 export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
   issues: [],
   total: 0,
+};
+
+const PreviewRegistryEntrySchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  workspace_name: z.string(),
+  workspace_slug: z.string(),
+  project_id: z.string().nullable().optional(),
+  project_name: z.string().nullable().optional(),
+  runtime_id: z.string().nullable().optional(),
+  runtime_name: z.string().nullable().optional(),
+  runtime_status: z.string().nullable().optional(),
+  machine_identity: z.string().nullable().optional(),
+  preview_url: z.string(),
+  port: z.number(),
+  health_status: z.string(),
+  health_status_code: z.number().nullable().optional(),
+  health_message: z.string().nullable().optional(),
+  health_error: z.string().nullable().optional(),
+  last_checked_at: z.string(),
+  command_run_id: z.string().nullable().optional(),
+  command: z.string().nullable().optional(),
+  source: z.string(),
+}).loose();
+
+export const PreviewRegistryResponseSchema = z.object({
+  previews: z.array(PreviewRegistryEntrySchema).default([]),
+  last_checked_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_PREVIEW_REGISTRY_RESPONSE: PreviewRegistryResponse = {
+  previews: [],
+  last_checked_at: "",
 };
 
 const SubscriberSchema = z.object({

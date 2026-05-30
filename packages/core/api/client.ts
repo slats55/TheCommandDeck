@@ -88,6 +88,7 @@ import type {
   CommandRunExecuteRequest,
   CommandRunListResponse,
   CommandTemplatesResponse,
+  PreviewRegistryResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import { type Logger, noopLogger } from "../logger";
@@ -100,8 +101,10 @@ import {
   CommentsListSchema,
   EMPTY_ATTACHMENT,
   EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_PREVIEW_REGISTRY_RESPONSE,
   EMPTY_TIMELINE_ENTRIES,
   ListIssuesResponseSchema,
+  PreviewRegistryResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
 } from "./schemas";
@@ -1357,5 +1360,15 @@ export class ApiClient {
 
   async listCommandRuns(): Promise<CommandRunListResponse> {
     return this.fetch("/api/commandrunner/runs");
+  }
+
+  async listPreviewRegistry(): Promise<PreviewRegistryResponse> {
+    const response = await this.fetch<unknown>("/api/commandrunner/previews");
+    return parseWithFallback<PreviewRegistryResponse>(
+      response,
+      PreviewRegistryResponseSchema,
+      EMPTY_PREVIEW_REGISTRY_RESPONSE,
+      { endpoint: "listPreviewRegistry" },
+    );
   }
 }

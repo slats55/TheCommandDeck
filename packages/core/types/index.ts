@@ -97,4 +97,7 @@ export type {
   CommandRunExecuteRequest,
   CommandRunListResponse,
   CommandTemplatesResponse,
+  PreviewHealthStatus,
+  PreviewRegistryEntry,
+  PreviewRegistryResponse,
 } from "./commanddeck";
