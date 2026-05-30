@@ -115,11 +115,24 @@ Completed:
     - command executor allowlist currently permits only git inspection commands, so no trusted preview-start command-run signal exists
   - required dependency:
     - add a trusted server-side preview registration path sourced from daemon/runtime-authenticated execution evidence carrying `command_run_id` + `runtime_id`
+- `COMMANDDECK-PREVIEW-RUNTIME-AUTHENTICATED-REGISTRATION-020A`
+  - objective: trusted daemon/runtime-authenticated preview registration that persists verified runtime provenance without unsafe command provenance inference
+  - branch/commit: `feature/commanddeck-preview-runtime-authenticated-registration-020a` / `8127f4b6` (pending merge to `main`)
+  - acceptance gate: `CODEX_AUTHORIZED_ACCEPTANCE_GATE` passed (doctor/backend/frontend/full-suite/build/health)
+  - release track: `R0.2`
+  - delivered capability:
+    - daemon-token-only preview report route: `POST /api/daemon/runtimes/{runtimeId}/previews/report`
+    - server-derived runtime provenance (`runtime_id`) from authenticated daemon/runtime context
+    - payload spoofing rejection for mismatched `runtime_id`
+    - explicit preservation of `command_run_id = NULL` in this path
+    - UI distinction between verified runtime provenance and unproven preview provenance
+  - remaining dependency:
+    - trusted server-issued preview lifecycle correlation is still required before any command-run provenance linkage
 
 Next selected slice:
-- `COMMANDDECK-PREVIEW-PROVENANCE-PREREQ-020A`
-  - objective: create trusted daemon/runtime-authenticated preview registration event path that can safely persist `command_run_id`/`runtime_id`
-  - dependency: none beyond `019` (already merged)
+- `COMMANDDECK-PREVIEW-LIFECYCLE-RECOVERY-CONTROL-021`
+  - objective: add trusted preview lifecycle state and recovery/retirement controls based on runtime/health evidence
+  - dependency: `COMMANDDECK-PREVIEW-RUNTIME-AUTHENTICATED-REGISTRATION-020A`
   - release track: `R0.2`
 
 Backlog candidates:
