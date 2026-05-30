@@ -64,6 +64,9 @@ describe("CommandDeckPage Preview Registry", () => {
           health_status: "healthy",
           health_status_code: 200,
           last_checked_at: "2026-05-29T00:00:00Z",
+          last_success_at: "2026-05-29T00:00:00Z",
+          registered_at: "2026-05-28T00:00:00Z",
+          updated_at: "2026-05-29T00:00:00Z",
           source: "self_hosted_stack",
         },
       ],
@@ -77,6 +80,7 @@ describe("CommandDeckPage Preview Registry", () => {
     expect(screen.getByText("Healthy")).toBeInTheDocument();
     expect(screen.getByText("HTTP 200")).toBeInTheDocument();
     expect(screen.getByText("Work Machine")).toBeInTheDocument();
+    expect(screen.getByText("Last Successful Check")).toBeInTheDocument();
   });
 
   it("shows a truthful loading state", () => {
@@ -109,6 +113,8 @@ describe("CommandDeckPage Preview Registry", () => {
           health_message: "Preview is currently unavailable.",
           health_error: "dial tcp 10.0.0.5:3000: connectex: No connection could be made",
           last_checked_at: "2026-05-29T00:00:00Z",
+          registered_at: "2026-05-28T00:00:00Z",
+          updated_at: "2026-05-29T00:00:00Z",
           source: "self_hosted_stack",
         },
       ],

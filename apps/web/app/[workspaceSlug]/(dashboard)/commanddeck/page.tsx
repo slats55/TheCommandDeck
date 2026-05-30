@@ -191,6 +191,14 @@ export default function CommandDeckPage() {
                     <dd className="font-mono">{preview.port || "-"}</dd>
                   </div>
                   <div>
+                    <dt className="text-xs uppercase text-muted-foreground">Registered</dt>
+                    <dd>
+                      {preview.registered_at
+                        ? new Date(preview.registered_at).toLocaleString()
+                        : "-"}
+                    </dd>
+                  </div>
+                  <div>
                     <dt className="text-xs uppercase text-muted-foreground">Runtime</dt>
                     <dd>
                       {preview.runtime_name ?? preview.runtime_id ?? "No runtime registered"}
@@ -204,6 +212,22 @@ export default function CommandDeckPage() {
                   <div>
                     <dt className="text-xs uppercase text-muted-foreground">Machine</dt>
                     <dd className="break-all">{preview.machine_identity ?? "-"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs uppercase text-muted-foreground">Last Checked</dt>
+                    <dd>
+                      {preview.last_checked_at
+                        ? new Date(preview.last_checked_at).toLocaleString()
+                        : "-"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs uppercase text-muted-foreground">Last Successful Check</dt>
+                    <dd>
+                      {preview.last_success_at
+                        ? new Date(preview.last_success_at).toLocaleString()
+                        : "-"}
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-xs uppercase text-muted-foreground">Command</dt>

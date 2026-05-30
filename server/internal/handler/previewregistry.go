@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -38,6 +39,9 @@ type previewRegistryEntry struct {
 	HealthMessage    *string `json:"health_message,omitempty"`
 	HealthError      *string `json:"health_error,omitempty"`
 	LastCheckedAt    string  `json:"last_checked_at"`
+	LastSuccessAt    *string `json:"last_success_at,omitempty"`
+	RegisteredAt     string  `json:"registered_at"`
+	UpdatedAt        string  `json:"updated_at"`
 	CommandRunID     *string `json:"command_run_id"`
 	Command          *string `json:"command"`
 	Source           string  `json:"source"`
@@ -67,8 +71,8 @@ const (
 )
 
 // HandleCommandDeckPreviews returns the real previews known to this running
-// CommandDeck deployment. The first slice exposes the self-hosted web preview
-// and probes it live instead of storing synthetic preview records.
+// CommandDeck deployment. The self-hosted web preview is persisted from
+// trusted server configuration and refreshed with a bounded live health probe.
 func (h *Handler) HandleCommandDeckPreviews(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "workspaceID")
 	if workspaceID == "" {
@@ -95,7 +99,8 @@ func (h *Handler) HandleCommandDeckPreviews(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	checkedAt := time.Now().UTC().Format(time.RFC3339)
+	checkedAtTime := time.Now().UTC()
+	checkedAt := checkedAtTime.Format(time.RFC3339)
 	target, err := configuredPreviewTarget()
 	if err != nil {
 		slog.Warn("preview registry target rejected", "workspace_id", workspaceID, "error", err)
@@ -109,32 +114,85 @@ func (h *Handler) HandleCommandDeckPreviews(w http.ResponseWriter, r *http.Reque
 	health := probePreviewHealth(ctx, target)
 	runtime := selectPreviewRuntime(runtimes)
 
-	entry := previewRegistryEntry{
-		ID:               "self-hosted-web",
-		WorkspaceID:      workspaceID,
-		WorkspaceName:    workspace.Name,
-		WorkspaceSlug:    workspace.Slug,
-		ProjectID:        nil,
-		ProjectName:      nil,
-		RuntimeID:        runtimeID(runtime),
-		RuntimeName:      runtimeName(runtime),
-		RuntimeStatus:    runtimeStatus(runtime),
-		MachineIdentity:  runtimeMachineIdentity(runtime),
-		PreviewURL:       target.PublicURL,
-		Port:             target.Port,
-		HealthStatus:     health.Status,
-		HealthStatusCode: health.StatusCode,
-		HealthMessage:    health.PublicMessage,
-		LastCheckedAt:    checkedAt,
-		CommandRunID:     nil,
-		Command:          nil,
-		Source:           "self_hosted_stack",
+	var runtimeIDValue pgtype.UUID
+	if runtime != nil {
+		runtimeIDValue = runtime.ID
+	}
+
+	var lastSuccessAt pgtype.Timestamptz
+	if health.Status == previewHealthStatusHealthy {
+		lastSuccessAt = pgtype.Timestamptz{Time: checkedAtTime, Valid: true}
+	}
+
+	if _, err := h.Queries.UpsertPreviewRegistryRecord(ctx, db.UpsertPreviewRegistryRecordParams{
+		WorkspaceID:   wsUUID,
+		RuntimeID:     runtimeIDValue,
+		CommandRunID:  pgtype.UUID{},
+		Name:          "Self-hosted web preview",
+		PreviewUrl:    target.PublicURL,
+		Port:          int32(target.Port),
+		Source:        "self_hosted_stack",
+		Status:        health.Status,
+		LastCheckedAt: pgtype.Timestamptz{Time: checkedAtTime, Valid: true},
+		LastSuccessAt: lastSuccessAt,
+	}); err != nil {
+		slog.Error("upsert preview registry record failed", "workspace_id", workspaceID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to update preview registry")
+		return
+	}
+
+	records, err := h.Queries.ListPreviewRegistryRecords(ctx, wsUUID)
+	if err != nil {
+		slog.Error("list preview registry records failed", "workspace_id", workspaceID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list preview registry")
+		return
+	}
+
+	entries := make([]previewRegistryEntry, 0, len(records))
+	for _, record := range records {
+		entry := previewRegistryEntryFromRecord(record, workspaceID, workspace.Name, workspace.Slug)
+		if entry.PreviewURL == target.PublicURL && entry.Source == "self_hosted_stack" {
+			entry.HealthStatusCode = health.StatusCode
+			entry.HealthMessage = health.PublicMessage
+			entry.LastCheckedAt = checkedAt
+			if health.Status == previewHealthStatusHealthy {
+				entry.LastSuccessAt = &checkedAt
+			}
+		}
+		entries = append(entries, entry)
 	}
 
 	writeJSON(w, http.StatusOK, previewRegistryResponse{
-		Previews:      []previewRegistryEntry{entry},
+		Previews:      entries,
 		LastCheckedAt: checkedAt,
 	})
+}
+
+func previewRegistryEntryFromRecord(row db.ListPreviewRegistryRecordsRow, workspaceID, workspaceName, workspaceSlug string) previewRegistryEntry {
+	return previewRegistryEntry{
+		ID:               uuidToString(row.ID),
+		WorkspaceID:      workspaceID,
+		WorkspaceName:    workspaceName,
+		WorkspaceSlug:    workspaceSlug,
+		ProjectID:        nil,
+		ProjectName:      nil,
+		RuntimeID:        uuidToPtr(row.RuntimeID),
+		RuntimeName:      textToPtr(row.RuntimeName),
+		RuntimeStatus:    textToPtr(row.RuntimeStatus),
+		MachineIdentity:  textToPtr(row.RuntimeDaemonID),
+		PreviewURL:       row.PreviewUrl,
+		Port:             int(row.Port),
+		HealthStatus:     row.Status,
+		HealthStatusCode: nil,
+		HealthMessage:    nil,
+		LastCheckedAt:    timestampToString(row.LastCheckedAt),
+		LastSuccessAt:    timestampToPtr(row.LastSuccessAt),
+		RegisteredAt:     timestampToString(row.CreatedAt),
+		UpdatedAt:        timestampToString(row.UpdatedAt),
+		CommandRunID:     uuidToPtr(row.CommandRunID),
+		Command:          nil,
+		Source:           row.Source,
+	}
 }
 
 func configuredPreviewURL() string {

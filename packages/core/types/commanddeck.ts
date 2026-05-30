@@ -58,6 +58,9 @@ export interface PreviewRegistryEntry {
   health_message?: string | null;
   health_error?: string | null;
   last_checked_at: string;
+  last_success_at?: string | null;
+  registered_at: string;
+  updated_at: string;
   command_run_id?: string | null;
   command?: string | null;
   source: string;
