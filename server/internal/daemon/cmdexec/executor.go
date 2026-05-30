@@ -8,6 +8,7 @@ package cmdexec
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +19,12 @@ import (
 const (
 	// MaxDuration is the maximum time a command is allowed to run.
 	MaxDuration = 30 * time.Second
+	// MaxStdoutBytes is the maximum stdout bytes kept per command run.
+	MaxStdoutBytes = 64 * 1024
+	// MaxStderrBytes is the maximum stderr bytes kept per command run.
+	MaxStderrBytes = 64 * 1024
+	// OutputTruncatedMarker is appended when captured output exceeds safety limits.
+	OutputTruncatedMarker = "\n[output truncated by CommandDeck safety limit]"
 )
 
 // Executor runs approved commands with bounded working directories.
@@ -29,6 +36,10 @@ type Executor struct {
 	// workspacesRoot is the base directory for all workspace worktrees.
 	// Used to validate working_directory boundaries.
 	workspacesRoot string
+	maxDuration    time.Duration
+	maxStdoutBytes int
+	maxStderrBytes int
+	runFn          func(ctx context.Context, cmd *exec.Cmd, stdoutLimit, stderrLimit int) (stdout, stderr string, exitCode int, stdoutTruncated, stderrTruncated bool, runErr error)
 }
 
 // NewExecutor creates a new command executor.
@@ -44,6 +55,10 @@ func NewExecutor(workspacesRoot string) *Executor {
 	return &Executor{
 		allowedCommands: allowed,
 		workspacesRoot:  workspacesRoot,
+		maxDuration:     MaxDuration,
+		maxStdoutBytes:  MaxStdoutBytes,
+		maxStderrBytes:  MaxStderrBytes,
+		runFn:           runCommand,
 	}
 }
 
@@ -127,20 +142,34 @@ func (e *Executor) Execute(ctx context.Context, command string, workingDir strin
 	}
 
 	// Step 6: execute with timeout using argv (no shell).
-	ctx, cancel := context.WithTimeout(ctx, MaxDuration)
+	ctx, cancel := context.WithTimeout(ctx, e.maxDuration)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, binary, argv[1:]...)
 	cmd.Dir = workingDir
 	cmd.Env = os.Environ() // inherit daemon environment, no extra secrets
 
-	stdout, stderr, exitCode := runCommand(ctx, cmd)
+	stdout, stderr, exitCode, stdoutTruncated, stderrTruncated, runErr := e.runFn(ctx, cmd, e.maxStdoutBytes, e.maxStderrBytes)
 
 	status := "completed"
 	if ctx.Err() == context.DeadlineExceeded {
 		status = "timeout"
+		if strings.TrimSpace(stderr) == "" {
+			stderr = "command timed out before completion"
+		}
+	} else if errors.Is(runErr, context.DeadlineExceeded) {
+		status = "timeout"
+		if strings.TrimSpace(stderr) == "" {
+			stderr = "command timed out before completion"
+		}
 	} else if exitCode != 0 {
 		status = "failed"
+	}
+	if stdoutTruncated && !strings.Contains(stdout, OutputTruncatedMarker) {
+		stdout += OutputTruncatedMarker
+	}
+	if stderrTruncated && !strings.Contains(stderr, OutputTruncatedMarker) {
+		stderr += OutputTruncatedMarker
 	}
 
 	return Result{
@@ -233,10 +262,44 @@ func (e *parseError) Error() string {
 	return e.msg + ": " + e.command
 }
 
-// runCommand executes cmd and captures stdout/stderr. Always waits for completion.
-func runCommand(ctx context.Context, cmd *exec.Cmd) (stdout, stderr string, exitCode int) {
-	outBuf, errBuf := &strings.Builder{}, &strings.Builder{}
-	cmd.Stdout, cmd.Stderr = outBuf, errBuf
+type cappedBuffer struct {
+	builder   strings.Builder
+	limit     int
+	written   int
+	truncated bool
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	if b.limit <= 0 {
+		b.truncated = true
+		b.written += len(p)
+		return len(p), nil
+	}
+	remaining := b.limit - b.builder.Len()
+	if remaining > 0 {
+		if len(p) <= remaining {
+			_, _ = b.builder.Write(p)
+		} else {
+			_, _ = b.builder.Write(p[:remaining])
+			b.truncated = true
+		}
+	} else {
+		b.truncated = true
+	}
+	b.written += len(p)
+	return len(p), nil
+}
+
+func (b *cappedBuffer) String() string {
+	return b.builder.String()
+}
+
+// runCommand executes cmd and captures bounded stdout/stderr. Always waits for completion.
+func runCommand(ctx context.Context, cmd *exec.Cmd, stdoutLimit, stderrLimit int) (stdout, stderr string, exitCode int, stdoutTruncated, stderrTruncated bool, runErr error) {
+	outBuf := &cappedBuffer{limit: stdoutLimit}
+	errBuf := &cappedBuffer{limit: stderrLimit}
+	cmd.Stdout = io.Writer(outBuf)
+	cmd.Stderr = io.Writer(errBuf)
 
 	err := cmd.Run()
 	exitCode = 0
@@ -249,5 +312,5 @@ func runCommand(ctx context.Context, cmd *exec.Cmd) (stdout, stderr string, exit
 		}
 	}
 
-	return outBuf.String(), errBuf.String(), exitCode
+	return outBuf.String(), errBuf.String(), exitCode, outBuf.truncated, errBuf.truncated, err
 }

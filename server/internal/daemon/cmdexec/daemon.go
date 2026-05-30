@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"time"
 
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -14,10 +13,10 @@ import (
 // CommandRunExecutePayload is the server → daemon payload for command_run:execute.
 // It is sent over the WebSocket connection that the daemon already has open.
 type CommandRunExecutePayload struct {
-	CommandRunID  string `json:"command_run_id"`
-	Command       string `json:"command"`
-	WorkingDir    string `json:"working_directory,omitempty"`
-	AllowedDir    string `json:"allowed_dir,omitempty"` // workspace boundary for validation
+	CommandRunID string `json:"command_run_id"`
+	Command      string `json:"command"`
+	WorkingDir   string `json:"working_directory,omitempty"`
+	AllowedDir   string `json:"allowed_dir,omitempty"` // workspace boundary for validation
 }
 
 // CommandRunResultPayload is the daemon → server payload for command_run:result.
@@ -71,7 +70,7 @@ func (h *WebSocketHandler) Handle(rawPayload json.RawMessage) {
 		workingDir = execPayload.AllowedDir
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), MaxDuration)
 	defer cancel()
 
 	result := h.executor.Execute(ctx, execPayload.Command, workingDir)

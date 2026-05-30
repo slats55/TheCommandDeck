@@ -285,6 +285,7 @@ func TestExecutorIsWithinBoundary(t *testing.T) {
 }
 
 func TestExecuteApprovedBuiltins(t *testing.T) {
+	requireGit(t)
 	baseDir := t.TempDir()
 	repoDir := filepath.Join(baseDir, "repo")
 	if err := os.Mkdir(repoDir, 0755); err != nil {
@@ -434,6 +435,7 @@ func TestExecuteNonexistentWorkingDir(t *testing.T) {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 func TestExecuteExitCodeAndStderrRecorded(t *testing.T) {
+	requireGit(t)
 	baseDir := t.TempDir()
 	exec := NewExecutor(baseDir)
 
@@ -450,6 +452,71 @@ func TestExecuteExitCodeAndStderrRecorded(t *testing.T) {
 	if result.Stderr == "" {
 		t.Fatal("Execute in non-git dir: stderr is empty, want real git failure output")
 	}
+}
+
+func TestExecuteMarksTimeoutWhenRunnerDeadlineExceeded(t *testing.T) {
+	exec := NewExecutor(t.TempDir())
+	command := installFakeAllowedCommand(t, exec)
+	exec.maxDuration = 15 * time.Millisecond
+	exec.runFn = func(ctx context.Context, _ *execCmd.Cmd, _, _ int) (string, string, int, bool, bool, error) {
+		<-ctx.Done()
+		return "", "", 1, false, false, ctx.Err()
+	}
+
+	result := exec.Execute(t.Context(), command, "")
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout status, got %q", result.Status)
+	}
+	if !strings.Contains(result.Stderr, "timed out") {
+		t.Fatalf("expected timeout stderr marker, got %q", result.Stderr)
+	}
+}
+
+func TestRunCommandBoundsOutputAndMarksTruncation(t *testing.T) {
+	cmd := execCmd.Command(os.Args[0], "-test.run=TestHelperLargeOutputProcess")
+	cmd.Env = append(os.Environ(),
+		"GO_WANT_HELPER_PROCESS=1",
+		"LARGE_STDOUT="+strings.Repeat("o", 256),
+		"LARGE_STDERR="+strings.Repeat("e", 256),
+	)
+
+	stdout, stderr, code, stdoutTruncated, stderrTruncated, err := runCommand(t.Context(), cmd, 32, 32)
+	if err != nil || code != 0 {
+		t.Fatalf("runCommand helper process failed: code=%d err=%v stderr=%q", code, err, stderr)
+	}
+	if len(stdout) != 32 {
+		t.Fatalf("expected bounded stdout length 32, got %d", len(stdout))
+	}
+	if len(stderr) != 32 {
+		t.Fatalf("expected bounded stderr length 32, got %d", len(stderr))
+	}
+	if !stdoutTruncated || !stderrTruncated {
+		t.Fatalf("expected both stdout/stderr to be truncated, got stdout=%v stderr=%v", stdoutTruncated, stderrTruncated)
+	}
+}
+
+func TestExecuteAppendsTruncationMarker(t *testing.T) {
+	exec := NewExecutor(t.TempDir())
+	command := installFakeAllowedCommand(t, exec)
+	exec.runFn = func(_ context.Context, _ *execCmd.Cmd, _, _ int) (string, string, int, bool, bool, error) {
+		return "ok", "warn", 0, true, true, nil
+	}
+	result := exec.Execute(t.Context(), command, "")
+	if !strings.Contains(result.Stdout, OutputTruncatedMarker) {
+		t.Fatalf("expected stdout truncation marker, got %q", result.Stdout)
+	}
+	if !strings.Contains(result.Stderr, OutputTruncatedMarker) {
+		t.Fatalf("expected stderr truncation marker, got %q", result.Stderr)
+	}
+}
+
+func TestHelperLargeOutputProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	_, _ = os.Stdout.WriteString(os.Getenv("LARGE_STDOUT"))
+	_, _ = os.Stderr.WriteString(os.Getenv("LARGE_STDERR"))
+	os.Exit(0)
 }
 
 func equalSlice(a, b []string) bool {
@@ -486,4 +553,25 @@ func initGitRepo(t *testing.T, dir string) {
 	}
 	runGit("add", "README.md")
 	runGit("commit", "-m", "initial")
+}
+
+func installFakeAllowedCommand(t *testing.T, exec *Executor) string {
+	t.Helper()
+	binDir := t.TempDir()
+	fakePath := filepath.Join(binDir, "fakecmd")
+	script := "#!/bin/sh\nexit 0\n"
+	if err := os.WriteFile(fakePath, []byte(script), 0755); err != nil {
+		t.Fatalf("failed to write fake command: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	command := "fakecmd status"
+	exec.allowedCommands[commandKey([]string{"fakecmd", "status"})] = true
+	return command
+}
+
+func requireGit(t *testing.T) {
+	t.Helper()
+	if _, err := execCmd.LookPath("git"); err != nil {
+		t.Skip("git not installed in test environment")
+	}
 }
