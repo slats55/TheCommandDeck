@@ -86,8 +86,19 @@ jobs:
       - name: Build
         run: cd server && go build ./...
 
+      - name: Verify sqlc generated code is up to date
+        run: |
+          cd server
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.27.0
+          "$(go env GOPATH)/bin/sqlc" generate
+          git diff --exit-code -- pkg/db/generated
+
       - name: Run migrations
-        run: cd server && go run ./cmd/migrate up
+        run: |
+          cd server
+          go run ./cmd/migrate up
+          go run ./cmd/migrate down
+          go run ./cmd/migrate up
 
       - name: Test
         run: cd server && go test ./...
