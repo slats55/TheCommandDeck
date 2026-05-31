@@ -10,6 +10,7 @@ const { apiMock } = vi.hoisted(() => ({
     listCommandRuns: vi.fn(),
     listPreviewRegistry: vi.fn(),
     syncSelfHostedPreviewRegistry: vi.fn(),
+    retirePreviewRegistryEntry: vi.fn(),
     runCommand: vi.fn(),
     cancelCommandRun: vi.fn(),
   },
@@ -57,6 +58,10 @@ describe("CommandDeckPage Preview Registry", () => {
     apiMock.listRuntimes.mockResolvedValue([]);
     apiMock.listCommandRuns.mockResolvedValue({ command_runs: [], total: 0 });
     apiMock.listPreviewRegistry.mockResolvedValue({
+      previews: [],
+      last_checked_at: "2026-05-29T00:00:00Z",
+    });
+    apiMock.retirePreviewRegistryEntry.mockResolvedValue({
       previews: [],
       last_checked_at: "2026-05-29T00:00:00Z",
     });
@@ -429,5 +434,38 @@ describe("CommandDeckPage Preview Registry", () => {
     render(<CommandDeckPage />, { wrapper: createWrapper() });
     expect(await screen.findByText("Lifecycle")).toBeInTheDocument();
     expect(await screen.findByText("Stale")).toBeInTheDocument();
+  });
+
+  it("retires stale preview records through the trusted lifecycle endpoint", async () => {
+    apiMock.listPreviewRegistry.mockResolvedValueOnce({
+      previews: [
+        {
+          id: "preview-stale-1",
+          workspace_id: "workspace-1",
+          workspace_name: "Acme",
+          workspace_slug: "acme",
+          preview_url: "http://localhost:3000",
+          port: 3000,
+          health_status: "healthy",
+          lifecycle_status: "stale",
+          health_status_code: 200,
+          last_checked_at: "2026-05-29T00:00:00Z",
+          last_success_at: "2026-05-29T00:00:00Z",
+          registered_at: "2026-05-28T00:00:00Z",
+          updated_at: "2026-05-29T00:00:00Z",
+          source: "self_hosted_stack",
+        },
+      ],
+      last_checked_at: "2026-05-29T00:00:00Z",
+    });
+
+    render(<CommandDeckPage />, { wrapper: createWrapper() });
+
+    const retireButton = await screen.findByRole("button", { name: "Retire Preview" });
+    fireEvent.click(retireButton);
+
+    await waitFor(() => {
+      expect(apiMock.retirePreviewRegistryEntry).toHaveBeenCalledWith("preview-stale-1");
+    });
   });
 });

@@ -44,6 +44,7 @@ export interface CommandTemplatesResponse {
 }
 
 export type PreviewHealthStatus = "healthy" | "unhealthy" | "unavailable" | "unknown";
+export type PreviewLifecycleStatus = "registered" | "healthy" | "stale" | "offline" | "runtime_disconnected" | "retired";
 
 export interface PreviewRegistryEntry {
   id: string;
@@ -59,6 +60,7 @@ export interface PreviewRegistryEntry {
   preview_url: string;
   port: number;
   health_status: PreviewHealthStatus;
+  lifecycle_status?: PreviewLifecycleStatus;
   health_status_code?: number | null;
   health_message?: string | null;
   health_error?: string | null;

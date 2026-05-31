@@ -13,13 +13,14 @@ import (
 
 const listPreviewRegistryRecords = `-- name: ListPreviewRegistryRecords :many
 SELECT
-    pr.id, pr.workspace_id, pr.runtime_id, pr.command_run_id, pr.name, pr.preview_url, pr.port, pr.source, pr.status, pr.last_checked_at, pr.last_success_at, pr.created_at, pr.updated_at,
+    pr.id, pr.workspace_id, pr.runtime_id, pr.command_run_id, pr.name, pr.preview_url, pr.port, pr.source, pr.status, pr.last_checked_at, pr.last_success_at, pr.created_at, pr.updated_at, pr.retired_at, pr.retired_by_type, pr.retired_by_id,
     ar.name AS runtime_name,
     ar.status AS runtime_status,
     ar.daemon_id AS runtime_daemon_id
 FROM preview_registry pr
 LEFT JOIN agent_runtime ar ON ar.id = pr.runtime_id
 WHERE pr.workspace_id = $1
+  AND pr.retired_at IS NULL
 ORDER BY pr.created_at ASC
 `
 
@@ -37,6 +38,9 @@ type ListPreviewRegistryRecordsRow struct {
 	LastSuccessAt   pgtype.Timestamptz `json:"last_success_at"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	RetiredAt       pgtype.Timestamptz `json:"retired_at"`
+	RetiredByType   pgtype.Text        `json:"retired_by_type"`
+	RetiredByID     pgtype.UUID        `json:"retired_by_id"`
 	RuntimeName     pgtype.Text        `json:"runtime_name"`
 	RuntimeStatus   pgtype.Text        `json:"runtime_status"`
 	RuntimeDaemonID pgtype.Text        `json:"runtime_daemon_id"`
@@ -65,6 +69,9 @@ func (q *Queries) ListPreviewRegistryRecords(ctx context.Context, workspaceID pg
 			&i.LastSuccessAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RetiredAt,
+			&i.RetiredByType,
+			&i.RetiredByID,
 			&i.RuntimeName,
 			&i.RuntimeStatus,
 			&i.RuntimeDaemonID,
@@ -77,6 +84,54 @@ func (q *Queries) ListPreviewRegistryRecords(ctx context.Context, workspaceID pg
 		return nil, err
 	}
 	return items, nil
+}
+
+const retirePreviewRegistryRecord = `-- name: RetirePreviewRegistryRecord :one
+UPDATE preview_registry
+SET
+    retired_at = COALESCE(retired_at, now()),
+    retired_by_type = COALESCE(retired_by_type, $1),
+    retired_by_id = COALESCE(retired_by_id, $2),
+    updated_at = now()
+WHERE id = $3
+  AND workspace_id = $4
+RETURNING id, workspace_id, runtime_id, command_run_id, name, preview_url, port, source, status, last_checked_at, last_success_at, created_at, updated_at, retired_at, retired_by_type, retired_by_id
+`
+
+type RetirePreviewRegistryRecordParams struct {
+	RetiredByType pgtype.Text `json:"retired_by_type"`
+	RetiredByID   pgtype.UUID `json:"retired_by_id"`
+	ID            pgtype.UUID `json:"id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) RetirePreviewRegistryRecord(ctx context.Context, arg RetirePreviewRegistryRecordParams) (PreviewRegistry, error) {
+	row := q.db.QueryRow(ctx, retirePreviewRegistryRecord,
+		arg.RetiredByType,
+		arg.RetiredByID,
+		arg.ID,
+		arg.WorkspaceID,
+	)
+	var i PreviewRegistry
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RuntimeID,
+		&i.CommandRunID,
+		&i.Name,
+		&i.PreviewUrl,
+		&i.Port,
+		&i.Source,
+		&i.Status,
+		&i.LastCheckedAt,
+		&i.LastSuccessAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RetiredAt,
+		&i.RetiredByType,
+		&i.RetiredByID,
+	)
+	return i, err
 }
 
 const upsertPreviewRegistryRecord = `-- name: UpsertPreviewRegistryRecord :one
@@ -112,8 +167,11 @@ DO UPDATE SET
     last_checked_at = EXCLUDED.last_checked_at,
     last_success_at = COALESCE(EXCLUDED.last_success_at, preview_registry.last_success_at),
     command_run_id = COALESCE(EXCLUDED.command_run_id, preview_registry.command_run_id),
+    retired_at = NULL,
+    retired_by_type = NULL,
+    retired_by_id = NULL,
     updated_at = now()
-RETURNING id, workspace_id, runtime_id, command_run_id, name, preview_url, port, source, status, last_checked_at, last_success_at, created_at, updated_at
+RETURNING id, workspace_id, runtime_id, command_run_id, name, preview_url, port, source, status, last_checked_at, last_success_at, created_at, updated_at, retired_at, retired_by_type, retired_by_id
 `
 
 type UpsertPreviewRegistryRecordParams struct {
@@ -157,6 +215,9 @@ func (q *Queries) UpsertPreviewRegistryRecord(ctx context.Context, arg UpsertPre
 		&i.LastSuccessAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RetiredAt,
+		&i.RetiredByType,
+		&i.RetiredByID,
 	)
 	return i, err
 }

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -37,6 +38,7 @@ type previewRegistryEntry struct {
 	PreviewURL       string  `json:"preview_url"`
 	Port             int     `json:"port"`
 	HealthStatus     string  `json:"health_status"`
+	LifecycleStatus  string  `json:"lifecycle_status"`
 	HealthStatusCode *int    `json:"health_status_code"`
 	HealthMessage    *string `json:"health_message,omitempty"`
 	HealthError      *string `json:"health_error,omitempty"`
@@ -73,10 +75,17 @@ const (
 	previewHealthStatusUnhealthy   = "unhealthy"
 	previewHealthStatusUnavailable = "unavailable"
 	previewHealthStatusUnknown     = "unknown"
+	previewLifecycleRegistered     = "registered"
+	previewLifecycleHealthy        = "healthy"
+	previewLifecycleStale          = "stale"
+	previewLifecycleOffline        = "offline"
+	previewLifecycleDisconnected   = "runtime_disconnected"
+	previewLifecycleRetired        = "retired"
 
 	safePreviewUnavailableMessage = "Preview is currently unavailable."
 	safePreviewUnhealthyMessage   = "Preview health check did not return a successful response."
 	previewHealthTimeout          = 2 * time.Second
+	previewStaleAfter             = 5 * time.Minute
 )
 
 // HandleCommandDeckPreviews returns persisted trusted preview records and does
@@ -169,6 +178,80 @@ func (h *Handler) HandleCommandDeckPreviewSelfHostedSync(w http.ResponseWriter, 
 	writeJSON(w, http.StatusOK, previewRegistryResponse{
 		Previews:      entries,
 		LastCheckedAt: checkedAt,
+	})
+}
+
+// HandleCommandDeckPreviewRetire marks a preview record as retired without
+// deleting historical evidence. Retired previews are removed from active
+// listing and may be re-activated by a future trusted runtime report.
+func (h *Handler) HandleCommandDeckPreviewRetire(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "workspaceID")
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	userUUID, ok := parseUUIDOrBadRequest(w, userID, "user_id")
+	if !ok {
+		return
+	}
+
+	previewID := strings.TrimSpace(chi.URLParam(r, "previewId"))
+	if previewID == "" {
+		writeError(w, http.StatusBadRequest, "preview_id is required")
+		return
+	}
+	previewUUID, ok := parseUUIDOrBadRequest(w, previewID, "preview_id")
+	if !ok {
+		return
+	}
+
+	_, err := h.Queries.RetirePreviewRegistryRecord(r.Context(), db.RetirePreviewRegistryRecordParams{
+		RetiredByType: strToText("member"),
+		RetiredByID:   userUUID,
+		ID:            previewUUID,
+		WorkspaceID:   workspaceUUID,
+	})
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "preview not found")
+			return
+		}
+		slog.Error("retire preview registry record failed", "workspace_id", workspaceID, "preview_id", previewID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to retire preview")
+		return
+	}
+
+	workspace, err := h.Queries.GetWorkspace(r.Context(), workspaceUUID)
+	if err != nil {
+		slog.Error("load workspace after preview retire failed", "workspace_id", workspaceID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list preview registry")
+		return
+	}
+
+	entries, lastCheckedAt, err := h.listPreviewRegistryEntries(r.Context(), workspaceUUID, workspaceID, workspace.Name, workspace.Slug)
+	if err != nil {
+		slog.Error("list preview registry records failed", "workspace_id", workspaceID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list preview registry")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, previewRegistryResponse{
+		Previews:      entries,
+		LastCheckedAt: lastCheckedAt,
 	})
 }
 
@@ -305,12 +388,13 @@ func (h *Handler) listPreviewRegistryEntries(ctx context.Context, workspaceUUID 
 		return nil, "", err
 	}
 	entries := make([]previewRegistryEntry, 0, len(records))
+	now := time.Now().UTC()
 	var latest time.Time
 	for _, record := range records {
 		if record.LastCheckedAt.Valid && record.LastCheckedAt.Time.After(latest) {
 			latest = record.LastCheckedAt.Time
 		}
-		entries = append(entries, previewRegistryEntryFromRecord(record, workspaceID, workspaceName, workspaceSlug))
+		entries = append(entries, previewRegistryEntryFromRecord(record, workspaceID, workspaceName, workspaceSlug, now))
 	}
 	lastCheckedAt := ""
 	if !latest.IsZero() {
@@ -344,7 +428,7 @@ func (h *Handler) upsertSelfHostedPreviewRecord(ctx context.Context, wsUUID pgty
 	return checkedAtTime, health, nil
 }
 
-func previewRegistryEntryFromRecord(row db.ListPreviewRegistryRecordsRow, workspaceID, workspaceName, workspaceSlug string) previewRegistryEntry {
+func previewRegistryEntryFromRecord(row db.ListPreviewRegistryRecordsRow, workspaceID, workspaceName, workspaceSlug string, now time.Time) previewRegistryEntry {
 	return previewRegistryEntry{
 		ID:               uuidToString(row.ID),
 		WorkspaceID:      workspaceID,
@@ -359,6 +443,7 @@ func previewRegistryEntryFromRecord(row db.ListPreviewRegistryRecordsRow, worksp
 		PreviewURL:       row.PreviewUrl,
 		Port:             int(row.Port),
 		HealthStatus:     row.Status,
+		LifecycleStatus:  previewLifecycleStatusFromRecord(row, now),
 		HealthStatusCode: nil,
 		HealthMessage:    nil,
 		LastCheckedAt:    timestampToString(row.LastCheckedAt),
@@ -369,6 +454,33 @@ func previewRegistryEntryFromRecord(row db.ListPreviewRegistryRecordsRow, worksp
 		Command:          nil,
 		Source:           row.Source,
 	}
+}
+
+func previewLifecycleStatusFromRecord(row db.ListPreviewRegistryRecordsRow, now time.Time) string {
+	if row.RetiredAt.Valid {
+		return previewLifecycleRetired
+	}
+
+	if row.RuntimeID.Valid && row.RuntimeStatus.Valid {
+		runtimeStatus := strings.ToLower(strings.TrimSpace(row.RuntimeStatus.String))
+		if runtimeStatus != "" && runtimeStatus != "online" {
+			return previewLifecycleDisconnected
+		}
+	}
+
+	if !row.LastCheckedAt.Valid || now.Sub(row.LastCheckedAt.Time.UTC()) > previewStaleAfter {
+		return previewLifecycleStale
+	}
+
+	if row.Status == previewHealthStatusHealthy {
+		return previewLifecycleHealthy
+	}
+
+	if row.Status == previewHealthStatusUnhealthy || row.Status == previewHealthStatusUnavailable || row.LastSuccessAt.Valid {
+		return previewLifecycleOffline
+	}
+
+	return previewLifecycleRegistered
 }
 
 func configuredPreviewURL() string {

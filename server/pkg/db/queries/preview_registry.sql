@@ -31,7 +31,21 @@ DO UPDATE SET
     last_checked_at = EXCLUDED.last_checked_at,
     last_success_at = COALESCE(EXCLUDED.last_success_at, preview_registry.last_success_at),
     command_run_id = COALESCE(EXCLUDED.command_run_id, preview_registry.command_run_id),
+    retired_at = NULL,
+    retired_by_type = NULL,
+    retired_by_id = NULL,
     updated_at = now()
+RETURNING *;
+
+-- name: RetirePreviewRegistryRecord :one
+UPDATE preview_registry
+SET
+    retired_at = COALESCE(retired_at, now()),
+    retired_by_type = COALESCE(retired_by_type, @retired_by_type),
+    retired_by_id = COALESCE(retired_by_id, @retired_by_id),
+    updated_at = now()
+WHERE id = @id
+  AND workspace_id = @workspace_id
 RETURNING *;
 
 -- name: ListPreviewRegistryRecords :many
@@ -43,4 +57,5 @@ SELECT
 FROM preview_registry pr
 LEFT JOIN agent_runtime ar ON ar.id = pr.runtime_id
 WHERE pr.workspace_id = @workspace_id
+  AND pr.retired_at IS NULL
 ORDER BY pr.created_at ASC;

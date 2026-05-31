@@ -170,6 +170,7 @@ const PreviewRegistryEntrySchema = z.object({
   preview_url: z.string(),
   port: z.number(),
   health_status: z.string(),
+  lifecycle_status: z.string().optional(),
   health_status_code: z.number().nullable().optional(),
   health_message: z.string().nullable().optional(),
   health_error: z.string().nullable().optional(),

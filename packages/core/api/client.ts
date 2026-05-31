@@ -1389,4 +1389,16 @@ export class ApiClient {
       { endpoint: "syncSelfHostedPreviewRegistry" },
     );
   }
+
+  async retirePreviewRegistryEntry(previewId: string): Promise<PreviewRegistryResponse> {
+    const response = await this.fetch<unknown>(`/api/commandrunner/previews/${previewId}/retire`, {
+      method: "POST",
+    });
+    return parseWithFallback<PreviewRegistryResponse>(
+      response,
+      PreviewRegistryResponseSchema,
+      EMPTY_PREVIEW_REGISTRY_RESPONSE,
+      { endpoint: "retirePreviewRegistryEntry" },
+    );
+  }
 }
