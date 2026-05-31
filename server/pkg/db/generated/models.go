@@ -249,6 +249,20 @@ type CommandTemplate struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CommandWorkflowExecution struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ProjectID     pgtype.UUID        `json:"project_id"`
+	CommandRunID  pgtype.UUID        `json:"command_run_id"`
+	Title         string             `json:"title"`
+	Objective     string             `json:"objective"`
+	Status        string             `json:"status"`
+	CreatedByType string             `json:"created_by_type"`
+	CreatedByID   pgtype.UUID        `json:"created_by_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Comment struct {
 	ID             pgtype.UUID        `json:"id"`
 	IssueID        pgtype.UUID        `json:"issue_id"`

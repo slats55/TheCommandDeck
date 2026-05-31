@@ -77,3 +77,41 @@ export interface PreviewRegistryResponse {
   previews: PreviewRegistryEntry[];
   last_checked_at: string;
 }
+
+export type CommandWorkflowExecutionStatus =
+  | "planned"
+  | "running"
+  | "needs_review"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface CommandWorkflowExecution {
+  id: string;
+  workspace_id: string;
+  project_id?: string | null;
+  project_title?: string | null;
+  command_run_id?: string | null;
+  command_run_status?: string | null;
+  command_run?: string | null;
+  title: string;
+  objective: string;
+  status: CommandWorkflowExecutionStatus;
+  created_by_type: string;
+  created_by_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CommandWorkflowExecutionsResponse {
+  workflow_executions: CommandWorkflowExecution[];
+  total: number;
+}
+
+export interface CreateCommandWorkflowExecutionRequest {
+  title: string;
+  objective: string;
+  project_id?: string;
+  command_run_id?: string;
+  status?: CommandWorkflowExecutionStatus;
+}

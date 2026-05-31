@@ -10,6 +10,8 @@ import type {
   CommandRun,
   CommandRunUpdatedPayload,
   CommandRunListResponse,
+  CommandWorkflowExecution,
+  CommandWorkflowExecutionStatus,
   PreviewRegistryEntry,
   PreviewLifecycleStatus,
 } from "@multica/core/types";
@@ -53,6 +55,11 @@ export default function CommandDeckPage() {
   const [selectedRuntimeId, setSelectedRuntimeId] = useState<string>("");
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [retiringPreviewId, setRetiringPreviewId] = useState<string | null>(null);
+  const [workflowTitle, setWorkflowTitle] = useState<string>("");
+  const [workflowObjective, setWorkflowObjective] = useState<string>("");
+  const [workflowStatus, setWorkflowStatus] = useState<CommandWorkflowExecutionStatus>("planned");
+  const [workflowCommandRunID, setWorkflowCommandRunID] = useState<string>("");
+  const [workflowMessage, setWorkflowMessage] = useState<string>("");
 
   // Fetch command templates
   const {
@@ -90,6 +97,15 @@ export default function CommandDeckPage() {
     queryKey: ["commanddeck", "previews", wsId],
     queryFn: () => api.listPreviewRegistry(),
     refetchInterval: 15000,
+  });
+
+  const {
+    data: workflowData,
+    isLoading: workflowsLoading,
+  } = useQuery({
+    queryKey: ["commanddeck", "workflows", wsId],
+    queryFn: () => api.listCommandWorkflowExecutions(),
+    refetchInterval: 10000,
   });
 
   const previewSyncMutation = useMutation({
@@ -140,12 +156,42 @@ export default function CommandDeckPage() {
       setStatusMessage(`Failed to cancel command: ${err.message}`);
     },
   });
+  const workflowCreateMutation = useMutation({
+    mutationFn: () => api.createCommandWorkflowExecution({
+      title: workflowTitle,
+      objective: workflowObjective,
+      status: workflowStatus,
+      command_run_id: workflowCommandRunID || undefined,
+    }),
+    onSuccess: () => {
+      setWorkflowTitle("");
+      setWorkflowObjective("");
+      setWorkflowStatus("planned");
+      setWorkflowCommandRunID("");
+      setWorkflowMessage("Workflow execution record created.");
+      queryClient.invalidateQueries({ queryKey: ["commanddeck", "workflows", wsId] });
+    },
+    onError: (err: Error) => {
+      setWorkflowMessage(`Failed to create workflow execution: ${err.message}`);
+    },
+  });
+  const workflowStatusMutation = useMutation({
+    mutationFn: ({ workflowId, status }: { workflowId: string; status: CommandWorkflowExecutionStatus }) =>
+      api.updateCommandWorkflowExecutionStatus(workflowId, status),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["commanddeck", "workflows", wsId] });
+    },
+    onError: (err: Error) => {
+      setWorkflowMessage(`Failed to update workflow status: ${err.message}`);
+    },
+  });
 
   const templates: CommandTemplate[] = templatesData?.templates ?? [];
   const runs: CommandRun[] = runsData?.command_runs ?? [];
   const runtimes = runtimesData ?? [];
   const onlineRuntimes = runtimes.filter((rt) => rt.status === "online");
   const previews: PreviewRegistryEntry[] = previewsData?.previews ?? [];
+  const workflows: CommandWorkflowExecution[] = workflowData?.workflow_executions ?? [];
   const runtimesById = new Map(runtimes.map((runtime) => [runtime.id, runtime]));
 
   useWSEvent("command_run:updated", (payload) => {
@@ -285,6 +331,38 @@ export default function CommandDeckPage() {
     }
   };
 
+  const workflowStatusLabel = (status: CommandWorkflowExecutionStatus): string => {
+    switch (status) {
+      case "planned": return "Planned";
+      case "running": return "Running";
+      case "needs_review": return "Needs Review";
+      case "completed": return "Completed";
+      case "failed": return "Failed";
+      case "cancelled": return "Cancelled";
+      default: return status;
+    }
+  };
+
+  const workflowStatusColor = (status: CommandWorkflowExecutionStatus): string => {
+    switch (status) {
+      case "completed": return "text-green-600";
+      case "failed":
+      case "cancelled": return "text-red-600";
+      case "running":
+      case "needs_review": return "text-amber-600";
+      default: return "text-muted-foreground";
+    }
+  };
+
+  const nextWorkflowStatus = (status: CommandWorkflowExecutionStatus): CommandWorkflowExecutionStatus | null => {
+    switch (status) {
+      case "planned": return "running";
+      case "running": return "needs_review";
+      case "needs_review": return "completed";
+      default: return null;
+    }
+  };
+
   const previewRuntimeProvenanceLabel = (preview: PreviewRegistryEntry): string => {
     if (!preview.runtime_id) {
       return "Runtime provenance not yet established";
@@ -301,6 +379,14 @@ export default function CommandDeckPage() {
       return "Reported by verified runtime";
     }
     return "Reported by verified runtime (runtime status unknown)";
+  };
+
+  const handleCreateWorkflow = () => {
+    if (!workflowTitle.trim()) {
+      setWorkflowMessage("Workflow title is required.");
+      return;
+    }
+    workflowCreateMutation.mutate();
   };
 
   return (
@@ -572,6 +658,153 @@ export default function CommandDeckPage() {
         {/* Status message */}
         {statusMessage && (
           <p className="text-sm text-muted-foreground">{statusMessage}</p>
+        )}
+      </div>
+
+      {/* Workflow Execution Records */}
+      <div className="rounded-lg border bg-card p-6 space-y-4">
+        <h2 className="text-lg font-medium">Workflow Execution Records</h2>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <label htmlFor="workflow-title" className="text-sm font-medium">
+              Workflow Title
+            </label>
+            <input
+              id="workflow-title"
+              type="text"
+              className="mt-1 block w-full rounded-md border px-3 py-2 text-sm"
+              value={workflowTitle}
+              onChange={(e) => setWorkflowTitle(e.target.value)}
+              placeholder="e.g. Preview Runtime Rollout"
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label htmlFor="workflow-objective" className="text-sm font-medium">
+              Objective
+            </label>
+            <textarea
+              id="workflow-objective"
+              className="mt-1 block w-full rounded-md border px-3 py-2 text-sm"
+              value={workflowObjective}
+              onChange={(e) => setWorkflowObjective(e.target.value)}
+              rows={3}
+              placeholder="Describe the delivery objective for this record."
+            />
+          </div>
+          <div>
+            <label htmlFor="workflow-status" className="text-sm font-medium">
+              Initial Status
+            </label>
+            <select
+              id="workflow-status"
+              className="mt-1 block w-full rounded-md border px-3 py-2 text-sm"
+              value={workflowStatus}
+              onChange={(e) => setWorkflowStatus(e.target.value as CommandWorkflowExecutionStatus)}
+            >
+              <option value="planned">Planned</option>
+              <option value="running">Running</option>
+              <option value="needs_review">Needs Review</option>
+              <option value="completed">Completed</option>
+              <option value="failed">Failed</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="workflow-command-run" className="text-sm font-medium">
+              Command Run Evidence (optional)
+            </label>
+            <select
+              id="workflow-command-run"
+              className="mt-1 block w-full rounded-md border px-3 py-2 text-sm"
+              value={workflowCommandRunID}
+              onChange={(e) => setWorkflowCommandRunID(e.target.value)}
+            >
+              <option value="">No linked command run</option>
+              {runs.map((run) => (
+                <option key={run.id} value={run.id}>
+                  {run.command} ({statusLabel(run.status)})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <button
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          disabled={workflowCreateMutation.isPending}
+          onClick={handleCreateWorkflow}
+        >
+          {workflowCreateMutation.isPending ? "Creating..." : "Create Workflow Record"}
+        </button>
+        {workflowMessage && (
+          <p className="text-sm text-muted-foreground">{workflowMessage}</p>
+        )}
+
+        {workflowsLoading ? (
+          <p className="text-sm text-muted-foreground">Loading workflow records...</p>
+        ) : workflows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No workflow execution records exist for this workspace.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {workflows.map((workflow) => {
+              const nextStatus = nextWorkflowStatus(workflow.status);
+              const nextStatusText = nextStatus ? workflowStatusLabel(nextStatus) : null;
+              return (
+                <div key={workflow.id} className="rounded-md border p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{workflow.title}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">{workflow.objective || "-"}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className={workflowStatusColor(workflow.status)}>{workflowStatusLabel(workflow.status)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Updated {workflow.updated_at ? new Date(workflow.updated_at).toLocaleString() : "-"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                    <div>
+                      <dt className="text-xs uppercase text-muted-foreground">Command Run</dt>
+                      <dd className="font-mono">{workflow.command_run_id ?? "-"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs uppercase text-muted-foreground">Command Status</dt>
+                      <dd>{workflow.command_run_status ?? "-"}</dd>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <dt className="text-xs uppercase text-muted-foreground">Command</dt>
+                      <dd className="font-mono text-xs break-all">{workflow.command_run ?? "-"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs uppercase text-muted-foreground">Created</dt>
+                      <dd>{workflow.created_at ? new Date(workflow.created_at).toLocaleString() : "-"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs uppercase text-muted-foreground">Created By</dt>
+                      <dd>{workflow.created_by_type}</dd>
+                    </div>
+                  </dl>
+
+                  {nextStatus && (
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        className="rounded-md border px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                        disabled={workflowStatusMutation.isPending}
+                        onClick={() => workflowStatusMutation.mutate({ workflowId: workflow.id, status: nextStatus })}
+                      >
+                        {workflowStatusMutation.isPending ? "Updating..." : `Move to ${nextStatusText}`}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 

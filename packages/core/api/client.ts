@@ -88,6 +88,10 @@ import type {
   CommandRunExecuteRequest,
   CommandRunListResponse,
   CommandTemplatesResponse,
+  CommandWorkflowExecution,
+  CommandWorkflowExecutionStatus,
+  CommandWorkflowExecutionsResponse,
+  CreateCommandWorkflowExecutionRequest,
   PreviewRegistryResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
@@ -97,6 +101,10 @@ import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
   AttachmentResponseSchema,
+  CommandWorkflowExecutionSchema,
+  CommandWorkflowExecutionsResponseSchema,
+  EMPTY_COMMAND_WORKFLOW_EXECUTION,
+  EMPTY_COMMAND_WORKFLOW_EXECUTIONS_RESPONSE,
   ChildIssuesResponseSchema,
   CommentsListSchema,
   EMPTY_ATTACHMENT,
@@ -1399,6 +1407,52 @@ export class ApiClient {
       PreviewRegistryResponseSchema,
       EMPTY_PREVIEW_REGISTRY_RESPONSE,
       { endpoint: "retirePreviewRegistryEntry" },
+    );
+  }
+
+  async listCommandWorkflowExecutions(): Promise<CommandWorkflowExecutionsResponse> {
+    const response = await this.fetch<unknown>("/api/commandrunner/workflows");
+    return parseWithFallback<CommandWorkflowExecutionsResponse>(
+      response,
+      CommandWorkflowExecutionsResponseSchema,
+      EMPTY_COMMAND_WORKFLOW_EXECUTIONS_RESPONSE,
+      { endpoint: "listCommandWorkflowExecutions" },
+    );
+  }
+
+  async getCommandWorkflowExecution(workflowId: string): Promise<CommandWorkflowExecution> {
+    const response = await this.fetch<unknown>(`/api/commandrunner/workflows/${workflowId}`);
+    return parseWithFallback<CommandWorkflowExecution>(
+      response,
+      CommandWorkflowExecutionSchema,
+      EMPTY_COMMAND_WORKFLOW_EXECUTION,
+      { endpoint: "getCommandWorkflowExecution" },
+    );
+  }
+
+  async createCommandWorkflowExecution(data: CreateCommandWorkflowExecutionRequest): Promise<CommandWorkflowExecution> {
+    const response = await this.fetch<unknown>("/api/commandrunner/workflows", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback<CommandWorkflowExecution>(
+      response,
+      CommandWorkflowExecutionSchema,
+      EMPTY_COMMAND_WORKFLOW_EXECUTION,
+      { endpoint: "createCommandWorkflowExecution" },
+    );
+  }
+
+  async updateCommandWorkflowExecutionStatus(workflowId: string, status: CommandWorkflowExecutionStatus): Promise<CommandWorkflowExecution> {
+    const response = await this.fetch<unknown>(`/api/commandrunner/workflows/${workflowId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+    return parseWithFallback<CommandWorkflowExecution>(
+      response,
+      CommandWorkflowExecutionSchema,
+      EMPTY_COMMAND_WORKFLOW_EXECUTION,
+      { endpoint: "updateCommandWorkflowExecutionStatus" },
     );
   }
 }
