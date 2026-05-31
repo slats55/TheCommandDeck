@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -364,6 +365,111 @@ func TestReportRuntimePreview_RequiresDaemonTokenAuthPath(t *testing.T) {
 	}
 }
 
+func TestHandleCommandDeckPreviewRetire_HidesActiveRecordAndPreservesEvidence(t *testing.T) {
+	previewServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer previewServer.Close()
+
+	runtimeID, daemonID := createDaemonPreviewTestRuntime(t, "preview-retire-daemon-1")
+	previewID := reportRuntimePreviewForTest(t, runtimeID, daemonID, previewServer.URL)
+
+	req := newRequest(http.MethodPost, "/api/commandrunner/previews/"+previewID+"/retire", nil)
+	req = withURLParam(req, "workspaceID", testWorkspaceID)
+	req = withURLParam(req, "previewId", previewID)
+	w := httptest.NewRecorder()
+	testHandler.HandleCommandDeckPreviewRetire(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("HandleCommandDeckPreviewRetire status = %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp previewRegistryResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Previews) != 0 {
+		t.Fatalf("active previews length = %d, want 0 after retirement", len(resp.Previews))
+	}
+
+	var retiredAt *time.Time
+	var retiredByType *string
+	var retiredByID *string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT retired_at, retired_by_type, retired_by_id::text
+		FROM preview_registry
+		WHERE id = $1
+	`, previewID).Scan(&retiredAt, &retiredByType, &retiredByID); err != nil {
+		t.Fatalf("load retired preview: %v", err)
+	}
+	if retiredAt == nil || retiredAt.IsZero() {
+		t.Fatalf("retired_at = %v, want non-null timestamp", retiredAt)
+	}
+	if retiredByType == nil || *retiredByType != "member" {
+		t.Fatalf("retired_by_type = %v, want member", retiredByType)
+	}
+	if retiredByID == nil || *retiredByID != testUserID {
+		t.Fatalf("retired_by_id = %v, want %s", retiredByID, testUserID)
+	}
+}
+
+func TestHandleCommandDeckPreviewRetire_IsWorkspaceScoped(t *testing.T) {
+	previewServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer previewServer.Close()
+
+	runtimeID, daemonID := createDaemonPreviewTestRuntime(t, "preview-retire-daemon-2")
+	previewID := reportRuntimePreviewForTest(t, runtimeID, daemonID, previewServer.URL)
+
+	otherWorkspaceID := createAdditionalWorkspaceForPreviewTest(t)
+	req := newRequest(http.MethodPost, "/api/commandrunner/previews/"+previewID+"/retire", nil)
+	req = withURLParam(req, "workspaceID", otherWorkspaceID)
+	req = withURLParam(req, "previewId", previewID)
+	req.Header.Set("X-Workspace-ID", otherWorkspaceID)
+
+	w := httptest.NewRecorder()
+	testHandler.HandleCommandDeckPreviewRetire(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("HandleCommandDeckPreviewRetire status = %d, want 404: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestReportRuntimePreview_ReactivatesRetiredRecordDeterministically(t *testing.T) {
+	previewServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer previewServer.Close()
+
+	runtimeID, daemonID := createDaemonPreviewTestRuntime(t, "preview-retire-daemon-3")
+	previewID := reportRuntimePreviewForTest(t, runtimeID, daemonID, previewServer.URL)
+
+	retireReq := newRequest(http.MethodPost, "/api/commandrunner/previews/"+previewID+"/retire", nil)
+	retireReq = withURLParam(retireReq, "workspaceID", testWorkspaceID)
+	retireReq = withURLParam(retireReq, "previewId", previewID)
+	retireW := httptest.NewRecorder()
+	testHandler.HandleCommandDeckPreviewRetire(retireW, retireReq)
+	if retireW.Code != http.StatusOK {
+		t.Fatalf("HandleCommandDeckPreviewRetire status = %d: %s", retireW.Code, retireW.Body.String())
+	}
+
+	reactivatedID := reportRuntimePreviewForTest(t, runtimeID, daemonID, previewServer.URL)
+	if reactivatedID != previewID {
+		t.Fatalf("reactivated preview ID = %q, want stable ID %q", reactivatedID, previewID)
+	}
+
+	var retiredAt *time.Time
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT retired_at
+		FROM preview_registry
+		WHERE id = $1
+	`, previewID).Scan(&retiredAt); err != nil {
+		t.Fatalf("load preview record after reactivation: %v", err)
+	}
+	if retiredAt != nil {
+		t.Fatalf("retired_at = %v, want NULL after trusted runtime reactivation", retiredAt)
+	}
+}
+
 func createDaemonPreviewTestRuntime(t *testing.T, daemonID string) (runtimeID string, normalizedDaemonID string) {
 	t.Helper()
 
@@ -404,6 +510,62 @@ func createDaemonPreviewTestRuntime(t *testing.T, daemonID string) (runtimeID st
 	})
 
 	return runtimeID, normalizedDaemonID
+}
+
+func reportRuntimePreviewForTest(t *testing.T, runtimeID, daemonID, previewURL string) string {
+	t.Helper()
+
+	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/previews/report", map[string]any{
+		"preview_url": previewURL,
+		"name":        "Runtime Reported Preview",
+	}, testWorkspaceID, daemonID)
+	req = withURLParam(req, "runtimeId", runtimeID)
+
+	w := httptest.NewRecorder()
+	testHandler.ReportRuntimePreview(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ReportRuntimePreview status = %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp previewRegistryResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Previews) != 1 {
+		t.Fatalf("previews length = %d, want 1", len(resp.Previews))
+	}
+	if resp.Previews[0].ID == "" {
+		t.Fatal("preview ID is empty")
+	}
+	return resp.Previews[0].ID
+}
+
+func createAdditionalWorkspaceForPreviewTest(t *testing.T) string {
+	t.Helper()
+
+	slug := fmt.Sprintf("preview-retire-test-%d", time.Now().UnixNano())
+	var workspaceID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, "Preview Retire Test Workspace", slug, "temporary workspace for preview retirement tests", "PRV").Scan(&workspaceID); err != nil {
+		t.Fatalf("create additional workspace: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'owner')
+	`, workspaceID, testUserID); err != nil {
+		t.Fatalf("create additional workspace member: %v", err)
+	}
+
+	t.Cleanup(func() {
+		if _, err := testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID); err != nil {
+			t.Fatalf("cleanup additional workspace: %v", err)
+		}
+	})
+
+	return workspaceID
 }
 
 func requestPreviewRegistry(t *testing.T) previewRegistryResponse {

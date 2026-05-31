@@ -97,6 +97,7 @@ export type {
   CommandRunExecuteRequest,
   CommandRunListResponse,
   CommandTemplatesResponse,
+  PreviewLifecycleStatus,
   PreviewHealthStatus,
   PreviewRegistryEntry,
   PreviewRegistryResponse,

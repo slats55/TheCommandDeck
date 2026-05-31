@@ -11,6 +11,7 @@ import type {
   CommandRunUpdatedPayload,
   CommandRunListResponse,
   PreviewRegistryEntry,
+  PreviewLifecycleStatus,
 } from "@multica/core/types";
 
 function isCommandRun(value: unknown): value is CommandRun {
@@ -51,6 +52,7 @@ export default function CommandDeckPage() {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [selectedRuntimeId, setSelectedRuntimeId] = useState<string>("");
   const [statusMessage, setStatusMessage] = useState<string>("");
+  const [retiringPreviewId, setRetiringPreviewId] = useState<string | null>(null);
 
   // Fetch command templates
   const {
@@ -94,6 +96,22 @@ export default function CommandDeckPage() {
     mutationFn: () => api.syncSelfHostedPreviewRegistry(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["commanddeck", "previews", wsId] });
+    },
+  });
+  const previewRetireMutation = useMutation({
+    mutationFn: (previewId: string) => api.retirePreviewRegistryEntry(previewId),
+    onMutate: (previewId) => {
+      setRetiringPreviewId(previewId);
+    },
+    onSuccess: () => {
+      setStatusMessage("Preview retired from active registry.");
+      queryClient.invalidateQueries({ queryKey: ["commanddeck", "previews", wsId] });
+    },
+    onError: (err: Error) => {
+      setStatusMessage(`Failed to retire preview: ${err.message}`);
+    },
+    onSettled: () => {
+      setRetiringPreviewId(null);
     },
   });
 
@@ -200,20 +218,44 @@ export default function CommandDeckPage() {
     return Date.now() - checked > 5 * 60 * 1000;
   };
 
-  const previewLifecycleLabel = (preview: PreviewRegistryEntry): string => {
-    if (isPreviewStale(preview)) return "Stale";
-    if (preview.health_status === "healthy") return "Healthy";
-    if (preview.last_success_at) return "Last known healthy";
-    if (preview.health_status === "unavailable") return "Unavailable";
-    return "Registered";
+  const deriveLegacyLifecycleStatus = (preview: PreviewRegistryEntry): PreviewLifecycleStatus => {
+    if (isPreviewStale(preview)) return "stale";
+    if (preview.health_status === "healthy") return "healthy";
+    if (preview.last_success_at || preview.health_status === "unavailable" || preview.health_status === "unhealthy") {
+      return "offline";
+    }
+    return "registered";
   };
 
-  const previewLifecycleColor = (preview: PreviewRegistryEntry): string => {
-    if (isPreviewStale(preview)) return "text-amber-600";
-    if (preview.health_status === "healthy") return "text-green-600";
-    if (preview.last_success_at) return "text-amber-600";
-    if (preview.health_status === "unavailable") return "text-red-600";
-    return "text-muted-foreground";
+  const previewLifecycleStatus = (preview: PreviewRegistryEntry): PreviewLifecycleStatus => {
+    return preview.lifecycle_status ?? deriveLegacyLifecycleStatus(preview);
+  };
+
+  const previewLifecycleLabel = (status: PreviewLifecycleStatus): string => {
+    switch (status) {
+      case "healthy": return "Healthy";
+      case "stale": return "Stale";
+      case "offline": return "Offline";
+      case "runtime_disconnected": return "Runtime disconnected";
+      case "retired": return "Retired";
+      default: return "Registered";
+    }
+  };
+
+  const previewLifecycleColor = (status: PreviewLifecycleStatus): string => {
+    switch (status) {
+      case "healthy": return "text-green-600";
+      case "stale":
+      case "runtime_disconnected": return "text-amber-600";
+      case "offline":
+      case "retired": return "text-red-600";
+      default: return "text-muted-foreground";
+    }
+  };
+
+  const canRetirePreview = (preview: PreviewRegistryEntry): boolean => {
+    const status = previewLifecycleStatus(preview);
+    return status === "stale" || status === "offline" || status === "runtime_disconnected";
   };
 
   const previewHealthColor = (status: PreviewRegistryEntry["health_status"]): string => {
@@ -376,13 +418,27 @@ export default function CommandDeckPage() {
                   </div>
                   <div>
                     <dt className="text-xs uppercase text-muted-foreground">Lifecycle</dt>
-                    <dd className={previewLifecycleColor(preview)}>{previewLifecycleLabel(preview)}</dd>
+                    <dd className={previewLifecycleColor(previewLifecycleStatus(preview))}>
+                      {previewLifecycleLabel(previewLifecycleStatus(preview))}
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-xs uppercase text-muted-foreground">Command</dt>
                     <dd>{preview.command ?? "Not command-started"}</dd>
                   </div>
                 </dl>
+
+                {canRetirePreview(preview) && (
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      className="rounded-md border px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                      disabled={previewRetireMutation.isPending}
+                      onClick={() => previewRetireMutation.mutate(preview.id)}
+                    >
+                      {previewRetireMutation.isPending && retiringPreviewId === preview.id ? "Retiring..." : "Retire Preview"}
+                    </button>
+                  </div>
+                )}
 
                 {preview.health_message && (
                   <p className="mt-3 break-all text-xs text-red-600">

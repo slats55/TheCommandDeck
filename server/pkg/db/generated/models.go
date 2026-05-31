@@ -479,6 +479,9 @@ type PreviewRegistry struct {
 	LastSuccessAt pgtype.Timestamptz `json:"last_success_at"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	RetiredAt     pgtype.Timestamptz `json:"retired_at"`
+	RetiredByType pgtype.Text        `json:"retired_by_type"`
+	RetiredByID   pgtype.UUID        `json:"retired_by_id"`
 }
 
 type Project struct {
