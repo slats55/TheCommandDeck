@@ -117,7 +117,7 @@ Completed:
     - add a trusted server-side preview registration path sourced from daemon/runtime-authenticated execution evidence carrying `command_run_id` + `runtime_id`
 - `COMMANDDECK-PREVIEW-RUNTIME-AUTHENTICATED-REGISTRATION-020A`
   - objective: trusted daemon/runtime-authenticated preview registration that persists verified runtime provenance without unsafe command provenance inference
-  - branch/commit: `feature/commanddeck-preview-runtime-authenticated-registration-020a` / `8127f4b6` (pending merge to `main`)
+  - branch/commit: `feature/commanddeck-preview-runtime-authenticated-registration-020a` / `8127f4b6` (merged; main at `96a539b99dc49db23167a3aa30786a9d4738d09f`)
   - acceptance gate: `CODEX_AUTHORIZED_ACCEPTANCE_GATE` passed (doctor/backend/frontend/full-suite/build/health)
   - release track: `R0.2`
   - delivered capability:
@@ -128,11 +128,24 @@ Completed:
     - UI distinction between verified runtime provenance and unproven preview provenance
   - remaining dependency:
     - trusted server-issued preview lifecycle correlation is still required before any command-run provenance linkage
+- `COMMANDDECK-PREVIEW-LIFECYCLE-RECOVERY-CONTROL-021`
+  - objective: trusted preview lifecycle status + non-destructive retirement/recovery controls for stale/offline runtime-reported previews
+  - branch/commit: `feature/commanddeck-preview-lifecycle-recovery-control-021` / `2a38e691` (prepared for merge in this sprint)
+  - acceptance gate: `CODEX_AUTHORIZED_ACCEPTANCE_GATE` passed (doctor/backend/sqlc/migration replay/frontend/full-suite/build/health)
+  - release track: `R0.2`
+  - delivered capability:
+    - migration `089` retirement metadata (`retired_at`, `retired_by_type`, `retired_by_id`)
+    - authenticated workspace-scoped retire endpoint: `POST /api/commandrunner/previews/{previewId}/retire`
+    - active preview listing excludes retired entries
+    - trusted runtime re-report reactivates retired preview record deterministically
+    - UI lifecycle rendering and retire action for stale/offline/runtime-disconnected previews
+  - remaining dependency:
+    - command-run provenance linkage still requires trusted server-issued preview operation correlation
 
 Next selected slice:
-- `COMMANDDECK-PREVIEW-LIFECYCLE-RECOVERY-CONTROL-021`
-  - objective: add trusted preview lifecycle state and recovery/retirement controls based on runtime/health evidence
-  - dependency: `COMMANDDECK-PREVIEW-RUNTIME-AUTHENTICATED-REGISTRATION-020A`
+- `COMMANDDECK-APPROVED-PREVIEW-LAUNCH-PROVENANCE-022`
+  - objective: add bounded approved preview lifecycle operation with server-issued correlation for safe runtime/command provenance linkage
+  - dependency: `COMMANDDECK-PREVIEW-LIFECYCLE-RECOVERY-CONTROL-021`
   - release track: `R0.2`
 
 Backlog candidates:
