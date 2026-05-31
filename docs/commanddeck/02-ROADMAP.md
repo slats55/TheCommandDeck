@@ -163,10 +163,29 @@ Completed:
       - `PATCH /api/commandrunner/workflows/{workflowId}/status`
     - command-run evidence linkage is explicit and workspace-validated (`command_run_id` optional, cross-workspace association rejected)
     - CommandDeck UI adds a workflow execution panel with truthful empty/data states, record creation, and bounded lifecycle progression controls
+- `COMMANDDECK-APPROVED-PREVIEW-LAUNCH-PROVENANCE-022B`
+  - objective: implement one bounded approved preview launch operation with server-issued correlation so runtime preview reports can safely attach verified `command_run_id`
+  - branch/commit: `feature/commanddeck-approved-preview-launch-provenance-022b` / `DEFERRED_NO_SAFE_TRUSTED_LAUNCH_CORRELATION_PATH`
+  - acceptance gate: `CODEX_AUTHORIZED_ACCEPTANCE_GATE` no-go for implementation (trust prerequisites still missing)
+  - release track: `R0.2`
+  - blocker:
+    - no bounded approved preview-launch action currently exists in the command execution allowlist
+    - no server-owned preview-launch correlation record exists for runtime/workspace/operation/expiry/consumption validation
+    - linking `command_run_id` from runtime preview reports remains unsafe inference without that server-issued correlation
+- `COMMANDDECK-CI-MERGE-EVIDENCE-HARDENING-023`
+  - objective: harden checked-in CI merge evidence by enforcing SQLC generated-code drift checks and migration replay in backend CI
+  - branch/commit: `chore/commanddeck-ci-merge-evidence-hardening-023` / `PENDING_MERGE`
+  - acceptance gate: `CODEX_AUTHORIZED_ACCEPTANCE_GATE` go with recorded limitations (`CI_CONFIG_LANDED_PENDING_REMOTE_RUN_PROOF`)
+  - release track: `R0.4`
+  - delivered capability:
+    - backend CI now verifies sqlc generated code drift after `sqlc generate`
+    - backend CI migration step now replays `up -> down -> up`
+  - known limitation:
+    - remote workflow success evidence still required after merge/push to claim `CI_REMOTE_VERIFICATION_GREEN`
 
 Next selected slice:
-- `COMMANDDECK-APPROVED-PREVIEW-LAUNCH-PROVENANCE-022B`
-  - objective: add one bounded approved preview lifecycle operation with server-issued correlation so preview registration can safely attach verified `command_run_id`
+- `COMMANDDECK-PREVIEW-LAUNCH-CORRELATION-PREREQUISITE-022C`
+  - objective: create a server-owned bounded preview-launch correlation model (workspace/runtime/operation/expiry/consumption) that enables a later safe retry of command provenance linkage
   - dependency: `COMMANDDECK-PREVIEW-LIFECYCLE-RECOVERY-CONTROL-021` and `COMMANDDECK-WORKFLOW-EXECUTION-RECORD-FOUNDATION-022A`
   - release track: `R0.2`
 
