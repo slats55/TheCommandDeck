@@ -1,5 +1,12 @@
 import { z } from "zod";
-import type { Attachment, ListIssuesResponse, PreviewRegistryResponse, TimelineEntry } from "../types";
+import type {
+  Attachment,
+  CommandWorkflowExecution,
+  CommandWorkflowExecutionsResponse,
+  ListIssuesResponse,
+  PreviewRegistryResponse,
+  TimelineEntry,
+} from "../types";
 
 // ---------------------------------------------------------------------------
 // Schemas for the highest-risk API endpoints — those whose responses drive
@@ -191,6 +198,45 @@ export const PreviewRegistryResponseSchema = z.object({
 export const EMPTY_PREVIEW_REGISTRY_RESPONSE: PreviewRegistryResponse = {
   previews: [],
   last_checked_at: "",
+};
+
+export const CommandWorkflowExecutionSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  project_id: z.string().nullable().optional(),
+  project_title: z.string().nullable().optional(),
+  command_run_id: z.string().nullable().optional(),
+  command_run_status: z.string().nullable().optional(),
+  command_run: z.string().nullable().optional(),
+  title: z.string(),
+  objective: z.string(),
+  status: z.string(),
+  created_by_type: z.string(),
+  created_by_id: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const CommandWorkflowExecutionsResponseSchema = z.object({
+  workflow_executions: z.array(CommandWorkflowExecutionSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_COMMAND_WORKFLOW_EXECUTIONS_RESPONSE: CommandWorkflowExecutionsResponse = {
+  workflow_executions: [],
+  total: 0,
+};
+
+export const EMPTY_COMMAND_WORKFLOW_EXECUTION: CommandWorkflowExecution = {
+  id: "",
+  workspace_id: "",
+  title: "",
+  objective: "",
+  status: "planned",
+  created_by_type: "",
+  created_by_id: "",
+  created_at: "",
+  updated_at: "",
 };
 
 const SubscriberSchema = z.object({

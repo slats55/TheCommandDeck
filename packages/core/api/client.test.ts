@@ -219,6 +219,99 @@ describe("ApiClient", () => {
     expect(init?.method).toBe("POST");
   });
 
+  it("uses workspace-scoped command workflow execution endpoints", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ workflow_executions: [], total: 0 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          id: "wf-1",
+          workspace_id: "ws-1",
+          title: "Preview lifecycle",
+          objective: "Track rollout",
+          status: "planned",
+          created_by_type: "member",
+          created_by_id: "u-1",
+          created_at: "2026-05-30T00:00:00Z",
+          updated_at: "2026-05-30T00:00:00Z",
+        }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          id: "wf-1",
+          workspace_id: "ws-1",
+          title: "Preview lifecycle",
+          objective: "Track rollout",
+          status: "running",
+          created_by_type: "member",
+          created_by_id: "u-1",
+          created_at: "2026-05-30T00:00:00Z",
+          updated_at: "2026-05-30T00:01:00Z",
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.listCommandWorkflowExecutions();
+    await client.createCommandWorkflowExecution({
+      title: "Preview lifecycle",
+      objective: "Track rollout",
+    });
+    await client.updateCommandWorkflowExecutionStatus("wf-1", "running");
+
+    const calls = fetchMock.mock.calls.map(([url, init]) => ({
+      url,
+      method: init?.method ?? "GET",
+      body: init?.body,
+    }));
+    expect(calls).toMatchObject([
+      {
+        url: "https://api.example.test/api/commandrunner/workflows",
+        method: "GET",
+      },
+      {
+        url: "https://api.example.test/api/commandrunner/workflows",
+        method: "POST",
+        body: JSON.stringify({
+          title: "Preview lifecycle",
+          objective: "Track rollout",
+        }),
+      },
+      {
+        url: "https://api.example.test/api/commandrunner/workflows/wf-1/status",
+        method: "PATCH",
+        body: JSON.stringify({ status: "running" }),
+      },
+    ]);
+  });
+
+  it("falls back to empty workflow execution list for malformed data", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ workflow_executions: [{ id: "bad" }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    const result = await client.listCommandWorkflowExecutions();
+
+    expect(result).toEqual({ workflow_executions: [], total: 0 });
+  });
+
   describe("getAttachment", () => {
     it("returns the parsed attachment for a well-formed response", async () => {
       vi.stubGlobal(

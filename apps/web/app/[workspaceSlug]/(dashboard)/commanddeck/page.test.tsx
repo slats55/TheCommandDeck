@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
@@ -11,6 +11,9 @@ const { apiMock } = vi.hoisted(() => ({
     listPreviewRegistry: vi.fn(),
     syncSelfHostedPreviewRegistry: vi.fn(),
     retirePreviewRegistryEntry: vi.fn(),
+    listCommandWorkflowExecutions: vi.fn(),
+    createCommandWorkflowExecution: vi.fn(),
+    updateCommandWorkflowExecutionStatus: vi.fn(),
     runCommand: vi.fn(),
     cancelCommandRun: vi.fn(),
   },
@@ -64,6 +67,32 @@ describe("CommandDeckPage Preview Registry", () => {
     apiMock.retirePreviewRegistryEntry.mockResolvedValue({
       previews: [],
       last_checked_at: "2026-05-29T00:00:00Z",
+    });
+    apiMock.listCommandWorkflowExecutions.mockResolvedValue({
+      workflow_executions: [],
+      total: 0,
+    });
+    apiMock.createCommandWorkflowExecution.mockResolvedValue({
+      id: "wf-1",
+      workspace_id: "workspace-1",
+      title: "Workflow",
+      objective: "Objective",
+      status: "planned",
+      created_by_type: "member",
+      created_by_id: "user-1",
+      created_at: "2026-05-29T00:00:00Z",
+      updated_at: "2026-05-29T00:00:00Z",
+    });
+    apiMock.updateCommandWorkflowExecutionStatus.mockResolvedValue({
+      id: "wf-1",
+      workspace_id: "workspace-1",
+      title: "Workflow",
+      objective: "Objective",
+      status: "running",
+      created_by_type: "member",
+      created_by_id: "user-1",
+      created_at: "2026-05-29T00:00:00Z",
+      updated_at: "2026-05-29T00:01:00Z",
     });
   });
 
@@ -242,8 +271,12 @@ describe("CommandDeckPage Preview Registry", () => {
       emitCommandRunUpdated({ run: { id: "run-live-2", status: 42 } });
     });
 
-    expect(screen.queryByText("Running")).not.toBeInTheDocument();
-    expect(screen.getByText("Pending")).toBeInTheDocument();
+    const runHistory = screen.getByRole("heading", { name: "Run History" }).closest("div");
+    if (!runHistory) {
+      throw new Error("Run History section not found");
+    }
+    expect(within(runHistory).queryByText("Running")).not.toBeInTheDocument();
+    expect(within(runHistory).getByText("Pending")).toBeInTheDocument();
   });
 
   it("shows real preview URL and healthy state from the API response", async () => {
@@ -466,6 +499,80 @@ describe("CommandDeckPage Preview Registry", () => {
 
     await waitFor(() => {
       expect(apiMock.retirePreviewRegistryEntry).toHaveBeenCalledWith("preview-stale-1");
+    });
+  });
+
+  it("shows workflow empty state without fake records", async () => {
+    render(<CommandDeckPage />, { wrapper: createWrapper() });
+
+    expect(await screen.findByText("Workflow Execution Records")).toBeInTheDocument();
+    expect(await screen.findByText("No workflow execution records exist for this workspace.")).toBeInTheDocument();
+  });
+
+  it("creates a workflow record with optional command run evidence", async () => {
+    apiMock.listCommandRuns.mockResolvedValueOnce({
+      command_runs: [
+        {
+          id: "run-link-1",
+          status: "completed",
+          command: "git status",
+          working_directory: "/tmp/ws",
+          stdout_truncated: false,
+          stderr_truncated: false,
+          created_at: "2026-05-29T00:00:00Z",
+        },
+      ],
+      total: 1,
+    });
+
+    render(<CommandDeckPage />, { wrapper: createWrapper() });
+
+    fireEvent.change(await screen.findByLabelText("Workflow Title"), {
+      target: { value: "Preview rollout" },
+    });
+    fireEvent.change(screen.getByLabelText("Objective"), {
+      target: { value: "Track launch and verification steps" },
+    });
+    fireEvent.change(screen.getByLabelText("Command Run Evidence (optional)"), {
+      target: { value: "run-link-1" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create Workflow Record" }));
+
+    await waitFor(() => {
+      expect(apiMock.createCommandWorkflowExecution).toHaveBeenCalledWith({
+        title: "Preview rollout",
+        objective: "Track launch and verification steps",
+        status: "planned",
+        command_run_id: "run-link-1",
+      });
+    });
+  });
+
+  it("updates workflow lifecycle status through the trusted status endpoint", async () => {
+    apiMock.listCommandWorkflowExecutions.mockResolvedValueOnce({
+      workflow_executions: [
+        {
+          id: "wf-progress-1",
+          workspace_id: "workspace-1",
+          title: "Preview lifecycle control",
+          objective: "Move from planned to running",
+          status: "planned",
+          created_by_type: "member",
+          created_by_id: "user-1",
+          created_at: "2026-05-29T00:00:00Z",
+          updated_at: "2026-05-29T00:00:00Z",
+        },
+      ],
+      total: 1,
+    });
+
+    render(<CommandDeckPage />, { wrapper: createWrapper() });
+    const transition = await screen.findByRole("button", { name: "Move to Running" });
+    fireEvent.click(transition);
+
+    await waitFor(() => {
+      expect(apiMock.updateCommandWorkflowExecutionStatus).toHaveBeenCalledWith("wf-progress-1", "running");
     });
   });
 });
