@@ -130,7 +130,7 @@ Completed:
     - trusted server-issued preview lifecycle correlation is still required before any command-run provenance linkage
 - `COMMANDDECK-PREVIEW-LIFECYCLE-RECOVERY-CONTROL-021`
   - objective: trusted preview lifecycle status + non-destructive retirement/recovery controls for stale/offline runtime-reported previews
-  - branch/commit: `feature/commanddeck-preview-lifecycle-recovery-control-021` / `2a38e691` (prepared for merge in this sprint)
+  - branch/commit: `feature/commanddeck-preview-lifecycle-recovery-control-021` / `6f8098ec8f9baf5e942b8fbce4067bb183335496` (merged)
   - acceptance gate: `CODEX_AUTHORIZED_ACCEPTANCE_GATE` passed (doctor/backend/sqlc/migration replay/frontend/full-suite/build/health)
   - release track: `R0.2`
   - delivered capability:
@@ -141,11 +141,33 @@ Completed:
     - UI lifecycle rendering and retire action for stale/offline/runtime-disconnected previews
   - remaining dependency:
     - command-run provenance linkage still requires trusted server-issued preview operation correlation
-
-Next selected slice:
 - `COMMANDDECK-APPROVED-PREVIEW-LAUNCH-PROVENANCE-022`
   - objective: add bounded approved preview lifecycle operation with server-issued correlation for safe runtime/command provenance linkage
-  - dependency: `COMMANDDECK-PREVIEW-LIFECYCLE-RECOVERY-CONTROL-021`
+  - branch/commit: `feature/commanddeck-approved-preview-launch-provenance-022` / `DEFERRED_ARCHITECTURE_PREREQUISITE_NOT_YET_PRESENT`
+  - acceptance gate: `CODEX_AUTHORIZED_ACCEPTANCE_GATE` no-go for implementation (no trusted server-issued preview launch correlation path exists yet)
+  - release track: `R0.2`
+  - blocker:
+    - preview reports can prove runtime provenance, but there is still no bounded approved preview-start operation that emits server-owned correlation evidence
+    - linking `command_run_id` from runtime-reported preview data would still require unsafe inference
+- `COMMANDDECK-WORKFLOW-EXECUTION-RECORD-FOUNDATION-022A`
+  - objective: introduce workspace-scoped workflow execution records with real lifecycle states and optional command-run evidence association
+  - branch/commit: `feature/commanddeck-workflow-execution-record-foundation-022a` / `5f93bc0a` (merged)
+  - acceptance gate: `CODEX_AUTHORIZED_ACCEPTANCE_GATE` passed (doctor/backend/sqlc/migration replay/frontend/full-suite/build/health)
+  - release track: `R0.3`
+  - delivered capability:
+    - migration `090` creates `command_workflow_execution` with lifecycle statuses (`planned`, `running`, `needs_review`, `completed`, `failed`, `cancelled`)
+    - workspace-scoped API endpoints:
+      - `GET /api/commandrunner/workflows`
+      - `POST /api/commandrunner/workflows`
+      - `GET /api/commandrunner/workflows/{workflowId}`
+      - `PATCH /api/commandrunner/workflows/{workflowId}/status`
+    - command-run evidence linkage is explicit and workspace-validated (`command_run_id` optional, cross-workspace association rejected)
+    - CommandDeck UI adds a workflow execution panel with truthful empty/data states, record creation, and bounded lifecycle progression controls
+
+Next selected slice:
+- `COMMANDDECK-APPROVED-PREVIEW-LAUNCH-PROVENANCE-022B`
+  - objective: add one bounded approved preview lifecycle operation with server-issued correlation so preview registration can safely attach verified `command_run_id`
+  - dependency: `COMMANDDECK-PREVIEW-LIFECYCLE-RECOVERY-CONTROL-021` and `COMMANDDECK-WORKFLOW-EXECUTION-RECORD-FOUNDATION-022A`
   - release track: `R0.2`
 
 Backlog candidates:
