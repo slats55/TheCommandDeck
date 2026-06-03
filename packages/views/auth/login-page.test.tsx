@@ -620,6 +620,48 @@ describe("LoginPage", () => {
   });
 
   // -------------------------------------------------------------------------
+  // devNotice slot (local development sign-in hint)
+  // -------------------------------------------------------------------------
+
+  it("renders devNotice on the email step when provided", () => {
+    renderWithI18n(
+      <LoginPage
+        onSuccess={onSuccess}
+        devNotice={<div data-testid="dev-notice">Local dev sign-in</div>}
+      />,
+    );
+    expect(screen.getByTestId("dev-notice")).toBeInTheDocument();
+  });
+
+  it("does not render devNotice when omitted", () => {
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
+    expect(screen.queryByTestId("dev-notice")).not.toBeInTheDocument();
+  });
+
+  it("hides devNotice once past the email step", async () => {
+    mockSendCode.mockResolvedValueOnce(undefined);
+    renderWithI18n(
+      <LoginPage
+        onSuccess={onSuccess}
+        devNotice={<div data-testid="dev-notice">Local dev sign-in</div>}
+      />,
+    );
+
+    expect(screen.getByTestId("dev-notice")).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/email/i), "test@example.com");
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+
+    // On the code-verification step the notice must be gone — it is an
+    // email-step affordance only.
+    await waitFor(() => {
+      expect(screen.getByText(/check your email/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("dev-notice")).not.toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
   // onTokenObtained callback
   // -------------------------------------------------------------------------
 

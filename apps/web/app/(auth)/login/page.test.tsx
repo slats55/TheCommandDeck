@@ -84,6 +84,7 @@ vi.mock("@multica/core/api", () => ({
   },
 }));
 
+import { configStore } from "@multica/core/config";
 import LoginPage from "./page";
 
 describe("LoginPage", () => {
@@ -92,6 +93,9 @@ describe("LoginPage", () => {
     searchParamsState.params = new URLSearchParams();
     authStateRef.state.user = null;
     authStateRef.state.isLoading = false;
+    // Reset runtime config between tests — the real (unmocked) config store is
+    // shared module state, so a dev-auth test must not leak into the next.
+    configStore.getState().setAuthConfig({ allowSignup: true, devAuthEnabled: false });
   });
 
   it("renders login form with email input and continue button", () => {
@@ -103,6 +107,30 @@ describe("LoginPage", () => {
     expect(
       screen.getByRole("button", { name: "Continue" })
     ).toBeInTheDocument();
+  });
+
+  it("identifies the product as CommandDeck via the brand wordmark", () => {
+    render(<LoginPage />, { wrapper: createWrapper() });
+    // Both the title copy and the standalone wordmark say CommandDeck — the
+    // entry is unmistakably branded regardless of locale title wording.
+    expect(screen.getAllByText(/CommandDeck/).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("hides the local-development sign-in notice by default", () => {
+    render(<LoginPage />, { wrapper: createWrapper() });
+    expect(
+      screen.queryByText("Local development sign-in"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the local-development sign-in notice only when dev auth is enabled, without rendering any code", () => {
+    configStore.getState().setAuthConfig({ allowSignup: true, devAuthEnabled: true });
+    const { container } = render(<LoginPage />, { wrapper: createWrapper() });
+
+    expect(screen.getByText("Local development sign-in")).toBeInTheDocument();
+    // The notice must guide the operator to the env-configured code, never
+    // print a code value — the server only sends a boolean, never the code.
+    expect(container.textContent).not.toMatch(/\b\d{6}\b/);
   });
 
   it("does not call sendCode when email is empty", async () => {
