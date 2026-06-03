@@ -8,7 +8,32 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// withWorkflowTestWorkspaceCtx injects the workspace + member context that the
+// real chi workspace middleware chain populates in production. The command
+// workflow handlers read the workspace ID via workspaceIDFromURL, which prefers
+// middleware.WorkspaceIDFromContext and only falls back to the chi URL param.
+// These tests call the handlers directly (no middleware), so without this the
+// handler sees an empty workspace and returns 400 "workspace_id is required"
+// before reaching the authorization/scoping logic under test. This mirrors
+// withChatTestWorkspaceCtx but is parameterized by workspace so the same helper
+// can scope a request to a secondary workspace for cross-workspace assertions.
+func withWorkflowTestWorkspaceCtx(t *testing.T, req *http.Request, workspaceID string) *http.Request {
+	t.Helper()
+	memberRow, err := testHandler.Queries.GetMemberByUserAndWorkspace(context.Background(), db.GetMemberByUserAndWorkspaceParams{
+		UserID:      util.MustParseUUID(testUserID),
+		WorkspaceID: util.MustParseUUID(workspaceID),
+	})
+	if err != nil {
+		t.Fatalf("load member row for workspace %s: %v", workspaceID, err)
+	}
+	return req.WithContext(middleware.SetMemberContext(req.Context(), workspaceID, memberRow))
+}
 
 func insertCommandRunForWorkflowTest(t *testing.T, workspaceID, runtimeID, initiatorID string) string {
 	t.Helper()
@@ -82,6 +107,7 @@ func TestCommandWorkflowExecutionCreateAndList(t *testing.T) {
 		"command_run_id": commandRunID,
 		"status":         "planned",
 	})
+	createReq = withWorkflowTestWorkspaceCtx(t, createReq, testWorkspaceID)
 
 	createW := httptest.NewRecorder()
 	testHandler.HandleCommandWorkflowExecutionCreate(createW, createReq)
@@ -104,6 +130,7 @@ func TestCommandWorkflowExecutionCreateAndList(t *testing.T) {
 	}
 
 	listReq := newRequest(http.MethodGet, "/api/commandrunner/workflows", nil)
+	listReq = withWorkflowTestWorkspaceCtx(t, listReq, testWorkspaceID)
 	listW := httptest.NewRecorder()
 	testHandler.HandleCommandWorkflowExecutionList(listW, listReq)
 	if listW.Code != http.StatusOK {
@@ -147,6 +174,10 @@ func TestCommandWorkflowExecutionCreateRejectsCrossWorkspaceCommandRun(t *testin
 		"objective":      "Should not be allowed",
 		"command_run_id": otherRunID,
 	})
+	// Scope the request to the primary workspace (where the caller is a member).
+	// The rejection must come from the command_run belonging to a *different*
+	// workspace, not from a missing workspace context.
+	req = withWorkflowTestWorkspaceCtx(t, req, testWorkspaceID)
 
 	w := httptest.NewRecorder()
 	testHandler.HandleCommandWorkflowExecutionCreate(w, req)
@@ -164,6 +195,7 @@ func TestCommandWorkflowExecutionStatusUpdateIsWorkspaceScoped(t *testing.T) {
 		"objective":      "Validate status changes",
 		"command_run_id": commandRunID,
 	})
+	createReq = withWorkflowTestWorkspaceCtx(t, createReq, testWorkspaceID)
 	createW := httptest.NewRecorder()
 	testHandler.HandleCommandWorkflowExecutionCreate(createW, createReq)
 	if createW.Code != http.StatusCreated {
@@ -179,6 +211,7 @@ func TestCommandWorkflowExecutionStatusUpdateIsWorkspaceScoped(t *testing.T) {
 		"status": commandWorkflowStatusRunning,
 	})
 	updateReq = withURLParam(updateReq, "workflowId", created.ID)
+	updateReq = withWorkflowTestWorkspaceCtx(t, updateReq, testWorkspaceID)
 	updateW := httptest.NewRecorder()
 	testHandler.HandleCommandWorkflowExecutionStatusUpdate(updateW, updateReq)
 	if updateW.Code != http.StatusOK {
@@ -193,11 +226,16 @@ func TestCommandWorkflowExecutionStatusUpdateIsWorkspaceScoped(t *testing.T) {
 		t.Fatalf("updated status = %q, want %q", updated.Status, commandWorkflowStatusRunning)
 	}
 
+	// Scope the same workflow ID to a *different* workspace the caller also
+	// belongs to. The workspace-scoped UPDATE must match no row (the workflow
+	// lives in the primary workspace), proving status updates are workspace
+	// scoped at the query level rather than only at the membership gate.
+	otherWorkspaceID, _ := createSecondaryWorkflowTestWorkspace(t)
 	crossWorkspaceReq := newRequest(http.MethodPatch, "/api/commandrunner/workflows/"+created.ID+"/status", map[string]any{
 		"status": commandWorkflowStatusCompleted,
 	})
-	crossWorkspaceReq.Header.Set("X-Workspace-ID", "00000000-0000-0000-0000-000000000000")
 	crossWorkspaceReq = withURLParam(crossWorkspaceReq, "workflowId", created.ID)
+	crossWorkspaceReq = withWorkflowTestWorkspaceCtx(t, crossWorkspaceReq, otherWorkspaceID)
 	crossWorkspaceW := httptest.NewRecorder()
 	testHandler.HandleCommandWorkflowExecutionStatusUpdate(crossWorkspaceW, crossWorkspaceReq)
 	if crossWorkspaceW.Code != http.StatusNotFound {
