@@ -104,7 +104,9 @@ describe("CommandDeckPage Preview Registry", () => {
   };
 
   it("shows cancel control only for active runs and sends run-scoped cancellation", async () => {
-    apiMock.listCommandRuns.mockResolvedValueOnce({
+    // Stable mockResolvedValue (not ...Once): the runs query has a refetchInterval
+    // and is invalidated after cancel, so every fetch returns the same two runs.
+    apiMock.listCommandRuns.mockResolvedValue({
       command_runs: [
         {
           id: "run-1",
@@ -131,7 +133,16 @@ describe("CommandDeckPage Preview Registry", () => {
 
     render(<CommandDeckPage />, { wrapper: createWrapper() });
 
-    const cancel = await screen.findByRole("button", { name: "Cancel run" });
+    // This is the first test in the file and renders six concurrent queries on a
+    // cold module cache. Under the parallel CI runner the runs query can stay in
+    // its "Loading runs..." state past testing-library's default 1s window, so the
+    // "Cancel run" button has not mounted yet. Give the async query headroom; the
+    // assertion below still proves the control is run-scoped to the active run.
+    const cancel = await screen.findByRole(
+      "button",
+      { name: "Cancel run" },
+      { timeout: 5000 },
+    );
     fireEvent.click(cancel);
 
     await waitFor(() => {
