@@ -214,6 +214,8 @@ func TestHandleCommandDeckPreviewSelfHostedSyncPersistsRecord(t *testing.T) {
 }
 
 func TestHandleCommandDeckPreviewSelfHostedSyncDoesNotAssignUnprovenRuntime(t *testing.T) {
+	resetPreviewRegistryForWorkspace(t)
+
 	previewServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -234,6 +236,8 @@ func TestHandleCommandDeckPreviewSelfHostedSyncDoesNotAssignUnprovenRuntime(t *t
 }
 
 func TestReportRuntimePreview_AssignsTrustedRuntimeAndKeepsCommandRunUnlinked(t *testing.T) {
+	resetPreviewRegistryForWorkspace(t)
+
 	previewServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -366,6 +370,8 @@ func TestReportRuntimePreview_RequiresDaemonTokenAuthPath(t *testing.T) {
 }
 
 func TestHandleCommandDeckPreviewRetire_HidesActiveRecordAndPreservesEvidence(t *testing.T) {
+	resetPreviewRegistryForWorkspace(t)
+
 	previewServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -375,8 +381,10 @@ func TestHandleCommandDeckPreviewRetire_HidesActiveRecordAndPreservesEvidence(t 
 	previewID := reportRuntimePreviewForTest(t, runtimeID, daemonID, previewServer.URL)
 
 	req := newRequest(http.MethodPost, "/api/commandrunner/previews/"+previewID+"/retire", nil)
-	req = withURLParam(req, "workspaceID", testWorkspaceID)
-	req = withURLParam(req, "previewId", previewID)
+	// Both URL params must live in a single chi route context — withURLParam
+	// replaces the route context on each call, so chaining it drops the first
+	// param. withURLParams preserves existing params.
+	req = withURLParams(req, "workspaceID", testWorkspaceID, "previewId", previewID)
 	w := httptest.NewRecorder()
 	testHandler.HandleCommandDeckPreviewRetire(w, req)
 	if w.Code != http.StatusOK {
@@ -413,6 +421,8 @@ func TestHandleCommandDeckPreviewRetire_HidesActiveRecordAndPreservesEvidence(t 
 }
 
 func TestHandleCommandDeckPreviewRetire_IsWorkspaceScoped(t *testing.T) {
+	resetPreviewRegistryForWorkspace(t)
+
 	previewServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -423,8 +433,7 @@ func TestHandleCommandDeckPreviewRetire_IsWorkspaceScoped(t *testing.T) {
 
 	otherWorkspaceID := createAdditionalWorkspaceForPreviewTest(t)
 	req := newRequest(http.MethodPost, "/api/commandrunner/previews/"+previewID+"/retire", nil)
-	req = withURLParam(req, "workspaceID", otherWorkspaceID)
-	req = withURLParam(req, "previewId", previewID)
+	req = withURLParams(req, "workspaceID", otherWorkspaceID, "previewId", previewID)
 	req.Header.Set("X-Workspace-ID", otherWorkspaceID)
 
 	w := httptest.NewRecorder()
@@ -435,6 +444,8 @@ func TestHandleCommandDeckPreviewRetire_IsWorkspaceScoped(t *testing.T) {
 }
 
 func TestReportRuntimePreview_ReactivatesRetiredRecordDeterministically(t *testing.T) {
+	resetPreviewRegistryForWorkspace(t)
+
 	previewServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -444,8 +455,7 @@ func TestReportRuntimePreview_ReactivatesRetiredRecordDeterministically(t *testi
 	previewID := reportRuntimePreviewForTest(t, runtimeID, daemonID, previewServer.URL)
 
 	retireReq := newRequest(http.MethodPost, "/api/commandrunner/previews/"+previewID+"/retire", nil)
-	retireReq = withURLParam(retireReq, "workspaceID", testWorkspaceID)
-	retireReq = withURLParam(retireReq, "previewId", previewID)
+	retireReq = withURLParams(retireReq, "workspaceID", testWorkspaceID, "previewId", previewID)
 	retireW := httptest.NewRecorder()
 	testHandler.HandleCommandDeckPreviewRetire(retireW, retireReq)
 	if retireW.Code != http.StatusOK {
@@ -510,6 +520,20 @@ func createDaemonPreviewTestRuntime(t *testing.T, daemonID string) (runtimeID st
 	})
 
 	return runtimeID, normalizedDaemonID
+}
+
+// resetPreviewRegistryForWorkspace clears the test workspace's preview records
+// so a test that asserts an exact preview count starts from a clean slate.
+// Preview records persist in preview_registry keyed by workspace, and several
+// tests share testWorkspaceID, so without this leftover previews from earlier
+// tests in the same run leak in and inflate the listed count. This mirrors the
+// inline cleanup already used by TestHandleCommandDeckPreviewsIsReadOnly and
+// TestHandleCommandDeckPreviewSelfHostedSyncPersistsRecord.
+func resetPreviewRegistryForWorkspace(t *testing.T) {
+	t.Helper()
+	if _, err := testPool.Exec(context.Background(), `DELETE FROM preview_registry WHERE workspace_id = $1`, testWorkspaceID); err != nil {
+		t.Fatalf("cleanup preview registry: %v", err)
+	}
 }
 
 func reportRuntimePreviewForTest(t *testing.T, runtimeID, daemonID, previewURL string) string {
