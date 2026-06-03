@@ -879,6 +879,9 @@ export class ApiClient {
     cdn_domain: string;
     allow_signup: boolean;
     google_client_id?: string;
+    /** True only on non-production instances with a valid local dev
+     *  verification code configured. Never carries the code itself. */
+    dev_auth_enabled?: boolean;
     posthog_key?: string;
     posthog_host?: string;
     analytics_environment?: string;

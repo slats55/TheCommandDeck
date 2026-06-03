@@ -61,6 +61,11 @@ interface LoginPageProps {
    *  app?" prompt; desktop omits it (a download prompt inside the app
    *  would be absurd). */
   extra?: ReactNode;
+  /** Slot rendered on the email step, below the email form. The web shell
+   *  uses it to surface a local-development sign-in hint when the backend
+   *  reports dev auth is enabled. Purely presentational — the auth flow is
+   *  identical whether or not it renders. */
+  devNotice?: ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +110,7 @@ export function LoginPage({
   onTokenObtained,
   onGoogleLogin,
   extra,
+  devNotice,
 }: LoginPageProps) {
   const { t } = useT("auth");
   const qc = useQueryClient();
@@ -435,6 +441,7 @@ export function LoginPage({
               <p className="text-sm text-destructive">{error}</p>
             )}
           </form>
+          {devNotice && <div className="mt-4">{devNotice}</div>}
         </CardContent>
         <CardFooter className="flex flex-col gap-3">
           <Button

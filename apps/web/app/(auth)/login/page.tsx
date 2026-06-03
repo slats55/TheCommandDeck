@@ -59,6 +59,7 @@ function LoginPageContent() {
   const qc = useQueryClient();
   const { t } = useT("auth");
   const googleClientId = useConfigStore((state) => state.googleClientId);
+  const devAuthEnabled = useConfigStore((state) => state.devAuthEnabled);
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const searchParams = useSearchParams();
@@ -188,6 +189,23 @@ function LoginPageContent() {
   return (
     <LoginPage
       onSuccess={handleSuccess}
+      logo={
+        <span className="text-lg font-semibold tracking-tight text-foreground">
+          CommandDeck
+        </span>
+      }
+      devNotice={
+        devAuthEnabled ? (
+          <div className="rounded-md border border-dashed border-border bg-muted/40 p-3 text-left">
+            <p className="text-xs font-medium text-foreground">
+              {t(($) => $.web.dev_notice_title)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t(($) => $.web.dev_notice)}
+            </p>
+          </div>
+        ) : undefined
+      }
       google={
         googleClientId
           ? {
