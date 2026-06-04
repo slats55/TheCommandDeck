@@ -118,9 +118,27 @@ func (h *Handler) RequireCommandDeckRuntime(w http.ResponseWriter, r *http.Reque
 		return db.AgentRuntime{}, false
 	}
 
-	// Runtime must be in an active state to receive commands.
-	if rt.Status != "online" && rt.Status != "busy" {
+	// Runtime must be in an active state to receive commands. agent_runtime.status
+	// is DB-constrained to "online" | "offline" (migration 004_agent_runtime_loop)
+	// — there is no "busy" runtime status — so "online" is the only admittable
+	// coarse state. A row the sweeper already flipped to "offline" is rejected
+	// here with a distinct 400 before the liveness check runs.
+	if rt.Status != "online" {
 		writeError(w, http.StatusBadRequest, "runtime is not online")
+		return db.AgentRuntime{}, false
+	}
+
+	// Stored status alone is insufficient: it lags the real daemon state because
+	// heartbeat DB writes are intentionally throttled/batched (see
+	// runtimeHeartbeatDBFlushInterval in daemon.go). A runtime can carry
+	// status="online" in the DB while its hot liveness key has already expired —
+	// exactly the window the Runtime Health panel renders as "stale" and the
+	// picker refuses to target. Resolve the same liveness signal here so a
+	// direct API call cannot dispatch to evidence the UI rejects, and so no
+	// pending command_run row is created for a dead target.
+	alive, livenessAvailable := h.runtimeLivenessSnapshot(ctx, []db.AgentRuntime{rt})
+	if !resolveRuntimeLive(rt, alive, livenessAvailable, time.Now()) {
+		writeError(w, http.StatusConflict, "runtime has no fresh heartbeat evidence; it may be stale or disconnected")
 		return db.AgentRuntime{}, false
 	}
 
