@@ -189,7 +189,41 @@ export default function CommandDeckPage() {
   const templates: CommandTemplate[] = templatesData?.templates ?? [];
   const runs: CommandRun[] = runsData?.command_runs ?? [];
   const runtimes = runtimesData ?? [];
-  const onlineRuntimes = runtimes.filter((rt) => rt.status === "online");
+  // Truthful heartbeat health for a runtime. `health_status` is the
+  // server-derived signal (online/stale/offline) the Runtime Health panel
+  // shows; the coarse `status` flag stays "online" even once heartbeats lapse,
+  // so reading it directly mislabels a stale runtime as online.
+  //
+  // Backward-compatibility only: when `health_status` is absent (an older
+  // backend that predates the derived field), we fall back to the coarse
+  // `status` flag. That fallback is NOT proof of heartbeat freshness — it just
+  // avoids breaking older payloads — so it maps a stored "online" to "online"
+  // and everything else to "offline".
+  const runtimeHealth = (
+    rt: { status?: string; health_status?: string },
+  ): "online" | "stale" | "offline" | "unknown" => {
+    switch (rt.health_status) {
+      case "online":
+      case "stale":
+      case "offline":
+      case "unknown":
+        return rt.health_status;
+      default:
+        return rt.status === "online" ? "online" : "offline";
+    }
+  };
+  // Command execution targets must be backed by fresh heartbeat evidence.
+  // Only "online" (heartbeat fresh within the server's 45s threshold) is a
+  // safe target. "stale" runtimes are still shown truthfully in Runtime Health
+  // for diagnosis, but the heartbeat evidence is aged — the daemon may no
+  // longer be reachable — so they are NOT offered as ordinary execution
+  // targets. "offline"/"unknown" are likewise excluded. The backend's
+  // command-dispatch validation still accepts the coarse stored status; this UI
+  // rule is the conservative front-door gate, not a replacement for that
+  // separately-reviewable backend hardening.
+  const targetableRuntimes = runtimes.filter(
+    (rt) => runtimeHealth(rt) === "online",
+  );
   const previews: PreviewRegistryEntry[] = previewsData?.previews ?? [];
   const workflows: CommandWorkflowExecution[] = workflowData?.workflow_executions ?? [];
   const runtimesById = new Map(runtimes.map((runtime) => [runtime.id, runtime]));
@@ -622,9 +656,9 @@ export default function CommandDeckPage() {
             <p className="text-sm text-muted-foreground">
               No runtimes are registered for this workspace.
             </p>
-          ) : onlineRuntimes.length === 0 ? (
+          ) : targetableRuntimes.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No online runtimes available. Connect a daemon to execute commands.
+              No freshly online runtimes available. Check daemon heartbeat status before running commands.
             </p>
           ) : (
             <select
@@ -633,9 +667,9 @@ export default function CommandDeckPage() {
               onChange={(e) => setSelectedRuntimeId(e.target.value)}
             >
               <option value="">-- Select a runtime --</option>
-              {onlineRuntimes.map((rt) => (
+              {targetableRuntimes.map((rt) => (
                 <option key={rt.id} value={rt.id}>
-                  {rt.name ?? rt.id} ({rt.status})
+                  {rt.name ?? rt.id} ({runtimeHealthLabel(runtimeHealth(rt))})
                 </option>
               ))}
             </select>
