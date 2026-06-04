@@ -5,17 +5,25 @@ interface ConfigState {
   cdnDomain: string;
   allowSignup: boolean;
   googleClientId: string;
+  /** Whether the backend has a local-development sign-in code active.
+   *  Drives the login screen's dev sign-in hint; never holds the code. */
+  devAuthEnabled: boolean;
   setCdnDomain: (domain: string) => void;
-  setAuthConfig: (config: { allowSignup: boolean; googleClientId?: string }) => void;
+  setAuthConfig: (config: {
+    allowSignup: boolean;
+    googleClientId?: string;
+    devAuthEnabled?: boolean;
+  }) => void;
 }
 
 export const configStore = createStore<ConfigState>((set) => ({
   cdnDomain: "",
   allowSignup: true,
   googleClientId: "",
+  devAuthEnabled: false,
   setCdnDomain: (domain) => set({ cdnDomain: domain }),
-  setAuthConfig: ({ allowSignup, googleClientId = "" }) =>
-    set({ allowSignup, googleClientId }),
+  setAuthConfig: ({ allowSignup, googleClientId = "", devAuthEnabled = false }) =>
+    set({ allowSignup, googleClientId, devAuthEnabled }),
 }));
 
 export function useConfigStore(): ConfigState;
