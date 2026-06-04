@@ -44,12 +44,78 @@ type AgentRuntimeResponse struct {
 }
 
 const (
-	runtimeOnlineFreshThreshold = 45 * time.Second
-	runtimeOfflineRecentWindow  = 5 * time.Minute
+	// runtimeOfflineRecentWindow bounds how long after a runtime's last
+	// heartbeat we still render it as "stale" rather than "offline" once it is
+	// no longer alive.
+	runtimeOfflineRecentWindow = 5 * time.Minute
+
+	// runtimeDBLivenessFallbackWindow is the maximum age of
+	// agent_runtime.last_seen_at we still treat as "alive" when the hot
+	// liveness store (Redis) is unavailable or errors. The DB column is
+	// intentionally write-throttled (see runtimeHeartbeatDBFlushInterval, 60s,
+	// in daemon.go) and bulk-coalesced by the HeartbeatScheduler, so an
+	// alive-but-batched runtime can legitimately carry a last_seen_at age of
+	// flush(60s) + heartbeat(15s) + batch tick(30s) = 105s. Deriving health
+	// from a 45s DB threshold therefore false-flagged healthy runtimes "stale"
+	// on every flush cycle.
+	//
+	// This window is aligned with the sweeper's staleThresholdSeconds (150s in
+	// cmd/server/runtime_sweeper.go): both decide DB-fallback aliveness from the
+	// same signal so listing, command dispatch, and the offline sweeper never
+	// disagree about whether a runtime is alive. Keep them in lockstep — if you
+	// change one, change the other and re-derive the 105s worst-case chain.
+	runtimeDBLivenessFallbackWindow = 150 * time.Second
 )
 
-func deriveRuntimeHealthStatus(rt db.AgentRuntime, now time.Time) (string, *int64) {
+// resolveRuntimeLive reports whether a runtime is alive right now under the
+// documented liveness contract:
+//
+//   - A runtime the DB has already moved out of the active "online" state is
+//     authoritatively NOT live; we never resurrect it from a lingering liveness
+//     key or a recent-but-batched last_seen_at.
+//   - When the hot liveness store is available, Redis is the authority: the
+//     runtime is live iff it holds an unexpired liveness key. last_seen_at is
+//     ignored because it is intentionally throttled and would produce false
+//     "stale" readings between DB flushes.
+//   - When the liveness store is unavailable/errored, we fall back to the DB
+//     last_seen_at window (runtimeDBLivenessFallbackWindow), matching the
+//     sweeper's DB-only fallback.
+//
+// `alive` and `livenessAvailable` come from a prior IsAliveBatch call so list
+// endpoints resolve many runtimes in a single round-trip.
+func resolveRuntimeLive(rt db.AgentRuntime, alive map[string]bool, livenessAvailable bool, now time.Time) bool {
+	// agent_runtime.status is DB-constrained to "online" | "offline" (migration
+	// 004_agent_runtime_loop); there is no "busy" runtime state. A row the
+	// sweeper has already flipped to "offline" is authoritatively not live and
+	// must never be resurrected from a lingering liveness key or a
+	// recent-but-batched last_seen_at.
+	if rt.Status != "online" {
+		return false
+	}
+	if livenessAvailable {
+		return alive[uuidToString(rt.ID)]
+	}
 	if !rt.LastSeenAt.Valid {
+		return false
+	}
+	return now.Sub(rt.LastSeenAt.Time) < runtimeDBLivenessFallbackWindow
+}
+
+// deriveRuntimeHealthStatus maps a runtime + its resolved liveness onto the
+// operator-facing health signal (online | stale | offline | unknown) and the
+// last_seen_at age in seconds. Aliveness is resolved upstream by
+// resolveRuntimeLive; this function only grades a non-live runtime as stale
+// (recently seen) vs offline (long gone). heartbeat_age_seconds intentionally
+// reflects DB last_seen_at age, which under Redis-backed liveness is the age of
+// the last *persisted* heartbeat, not the last network beat — a live runtime
+// can therefore report a non-zero age while still being "online".
+func deriveRuntimeHealthStatus(rt db.AgentRuntime, live bool, now time.Time) (string, *int64) {
+	if !rt.LastSeenAt.Valid {
+		if live {
+			// Live with no persisted last_seen_at yet (e.g. just-registered,
+			// Redis-touched but pre-first-flush). Report online without an age.
+			return "online", nil
+		}
 		return "unknown", nil
 	}
 
@@ -59,20 +125,56 @@ func deriveRuntimeHealthStatus(rt db.AgentRuntime, now time.Time) (string, *int6
 	}
 	ageSeconds := int64(age / time.Second)
 
-	if rt.Status == "online" {
-		if age <= runtimeOnlineFreshThreshold {
-			return "online", &ageSeconds
-		}
-		return "stale", &ageSeconds
+	if live {
+		return "online", &ageSeconds
 	}
-
 	if age <= runtimeOfflineRecentWindow {
 		return "stale", &ageSeconds
 	}
 	return "offline", &ageSeconds
 }
 
-func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
+// runtimeLivenessSnapshot fetches the hot-liveness snapshot for the given
+// runtimes in a single round-trip. Returns the alive map and whether the
+// liveness store was available/healthy for this call. Callers pass both to
+// resolveRuntimeLive so a DB-batched last_seen_at never yields a false "stale"
+// reading while Redis still holds a live key.
+func (h *Handler) runtimeLivenessSnapshot(ctx context.Context, rts []db.AgentRuntime) (map[string]bool, bool) {
+	if h.LivenessStore == nil || !h.LivenessStore.Available() || len(rts) == 0 {
+		return nil, false
+	}
+	ids := make([]string, len(rts))
+	for i, rt := range rts {
+		ids[i] = uuidToString(rt.ID)
+	}
+	alive, ok := h.LivenessStore.IsAliveBatch(ctx, ids)
+	if !ok {
+		return nil, false
+	}
+	return alive, true
+}
+
+// runtimeResponse builds a single runtime response, resolving health from the
+// hot liveness store (single-key batch) with DB fallback.
+func (h *Handler) runtimeResponse(ctx context.Context, rt db.AgentRuntime) AgentRuntimeResponse {
+	alive, ok := h.runtimeLivenessSnapshot(ctx, []db.AgentRuntime{rt})
+	live := resolveRuntimeLive(rt, alive, ok, time.Now())
+	return runtimeToResponse(rt, live)
+}
+
+// runtimeResponses builds responses for many runtimes, resolving liveness for
+// all of them in one IsAliveBatch round-trip.
+func (h *Handler) runtimeResponses(ctx context.Context, rts []db.AgentRuntime) []AgentRuntimeResponse {
+	alive, ok := h.runtimeLivenessSnapshot(ctx, rts)
+	now := time.Now()
+	resp := make([]AgentRuntimeResponse, len(rts))
+	for i, rt := range rts {
+		resp[i] = runtimeToResponse(rt, resolveRuntimeLive(rt, alive, ok, now))
+	}
+	return resp
+}
+
+func runtimeToResponse(rt db.AgentRuntime, live bool) AgentRuntimeResponse {
 	var metadata any
 	if rt.Metadata != nil {
 		json.Unmarshal(rt.Metadata, &metadata)
@@ -80,7 +182,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
-	healthStatus, heartbeatAgeSeconds := deriveRuntimeHealthStatus(rt, time.Now())
+	healthStatus, heartbeatAgeSeconds := deriveRuntimeHealthStatus(rt, live, time.Now())
 
 	return AgentRuntimeResponse{
 		ID:                  uuidToString(rt.ID),
@@ -625,7 +727,7 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusOK, runtimeToResponse(rt))
+	writeJSON(w, http.StatusOK, h.runtimeResponse(r.Context(), rt))
 }
 
 func canEditRuntime(member db.Member, rt db.AgentRuntime) bool {
@@ -676,10 +778,7 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]AgentRuntimeResponse, len(runtimes))
-	for i, rt := range runtimes {
-		resp[i] = runtimeToResponse(rt)
-	}
+	resp := h.runtimeResponses(r.Context(), runtimes)
 
 	writeJSON(w, http.StatusOK, resp)
 }

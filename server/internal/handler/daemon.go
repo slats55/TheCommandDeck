@@ -398,7 +398,18 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// the stale row so there's only ever one runtime per machine.
 		h.mergeLegacyRuntimes(r, registered, provider, req.LegacyDaemonIDs)
 
-		resp = append(resp, runtimeToResponse(registered))
+		// Registration is itself live evidence — the daemon just connected.
+		// Seed the hot liveness key now so runtime health resolves "online"
+		// immediately instead of reading "stale" for the gap until the first
+		// heartbeat touches Redis. Best-effort: the heartbeat path refreshes
+		// this key, and a failure here degrades to the DB-fallback window.
+		if registered.Status == "online" && h.LivenessStore.Available() {
+			if err := h.LivenessStore.Touch(r.Context(), uuidToString(registered.ID), runtimeLivenessTTL); err != nil {
+				slog.Warn("daemon register: liveness touch failed", "runtime_id", uuidToString(registered.ID), "error", err)
+			}
+		}
+
+		resp = append(resp, h.runtimeResponse(r.Context(), registered))
 	}
 
 	slog.Info("daemon registered", "workspace_id", req.WorkspaceID, "daemon_id", req.DaemonID, "runtimes_count", len(resp))
