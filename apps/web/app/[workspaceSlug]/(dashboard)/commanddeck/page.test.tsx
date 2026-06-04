@@ -205,6 +205,60 @@ describe("CommandDeckPage Preview Registry", () => {
     expect(screen.getByText("Last seen unknown")).toBeInTheDocument();
   });
 
+  it("labels command target runtimes with truthful heartbeat health, not the coarse online flag", async () => {
+    // A runtime can carry status "online" while its heartbeat has gone stale.
+    // The Runtime Health panel shows that truthfully ("Stale"); the command
+    // target picker must agree instead of advertising the same runtime as
+    // "(online)". Offline runtimes are not reachable and must not be offered.
+    apiMock.listRuntimes.mockResolvedValue([
+      {
+        id: "rt-online",
+        name: "Online Runtime",
+        provider: "codex",
+        runtime_mode: "local",
+        status: "online",
+        health_status: "online",
+        last_seen_at: "2026-05-29T00:00:00Z",
+      },
+      {
+        id: "rt-stale",
+        name: "Stale Runtime",
+        provider: "claude",
+        runtime_mode: "local",
+        status: "online",
+        health_status: "stale",
+        last_seen_at: "2026-05-29T00:00:00Z",
+      },
+      {
+        id: "rt-offline",
+        name: "Offline Runtime",
+        provider: "copilot",
+        runtime_mode: "local",
+        status: "offline",
+        health_status: "offline",
+        last_seen_at: "2026-05-29T00:00:00Z",
+      },
+    ]);
+
+    render(<CommandDeckPage />, { wrapper: createWrapper() });
+
+    // The stale runtime is selectable but labeled with its true health.
+    expect(
+      await screen.findByRole("option", { name: "Stale Runtime (Stale)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "Online Runtime (Online)" }),
+    ).toBeInTheDocument();
+    // No target is ever mislabeled with the coarse lowercase "(online)" flag.
+    expect(
+      screen.queryByRole("option", { name: /\(online\)/ }),
+    ).not.toBeInTheDocument();
+    // Offline runtimes are unreachable and never offered as a target.
+    expect(
+      screen.queryByRole("option", { name: /Offline Runtime/ }),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps execution disabled when no runtime is online", async () => {
     apiMock.listRuntimes.mockResolvedValue([
       {

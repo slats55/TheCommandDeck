@@ -189,7 +189,31 @@ export default function CommandDeckPage() {
   const templates: CommandTemplate[] = templatesData?.templates ?? [];
   const runs: CommandRun[] = runsData?.command_runs ?? [];
   const runtimes = runtimesData ?? [];
-  const onlineRuntimes = runtimes.filter((rt) => rt.status === "online");
+  // Truthful heartbeat health for a runtime. `health_status` is the
+  // server-derived signal (online/stale/offline) the Runtime Health panel
+  // shows; the coarse `status` flag stays "online" even once heartbeats lapse,
+  // so reading it directly mislabels a stale runtime as online. Fall back to
+  // `status` only for older backends that predate `health_status`.
+  const runtimeHealth = (
+    rt: { status?: string; health_status?: string },
+  ): "online" | "stale" | "offline" | "unknown" => {
+    switch (rt.health_status) {
+      case "online":
+      case "stale":
+      case "offline":
+      case "unknown":
+        return rt.health_status;
+      default:
+        return rt.status === "online" ? "online" : "offline";
+    }
+  };
+  // A runtime can be a command target when it is reachable — online, or stale
+  // (still connected, heartbeat aging). Offline runtimes cannot execute and are
+  // excluded so the picker never advertises an unreachable target.
+  const targetableRuntimes = runtimes.filter((rt) => {
+    const health = runtimeHealth(rt);
+    return health === "online" || health === "stale";
+  });
   const previews: PreviewRegistryEntry[] = previewsData?.previews ?? [];
   const workflows: CommandWorkflowExecution[] = workflowData?.workflow_executions ?? [];
   const runtimesById = new Map(runtimes.map((runtime) => [runtime.id, runtime]));
@@ -622,7 +646,7 @@ export default function CommandDeckPage() {
             <p className="text-sm text-muted-foreground">
               No runtimes are registered for this workspace.
             </p>
-          ) : onlineRuntimes.length === 0 ? (
+          ) : targetableRuntimes.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No online runtimes available. Connect a daemon to execute commands.
             </p>
@@ -633,9 +657,9 @@ export default function CommandDeckPage() {
               onChange={(e) => setSelectedRuntimeId(e.target.value)}
             >
               <option value="">-- Select a runtime --</option>
-              {onlineRuntimes.map((rt) => (
+              {targetableRuntimes.map((rt) => (
                 <option key={rt.id} value={rt.id}>
-                  {rt.name ?? rt.id} ({rt.status})
+                  {rt.name ?? rt.id} ({runtimeHealthLabel(runtimeHealth(rt))})
                 </option>
               ))}
             </select>
