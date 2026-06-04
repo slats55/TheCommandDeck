@@ -213,14 +213,16 @@ export default function CommandDeckPage() {
     }
   };
   // Command execution targets must be backed by fresh heartbeat evidence.
-  // Only "online" (heartbeat fresh within the server's 45s threshold) is a
-  // safe target. "stale" runtimes are still shown truthfully in Runtime Health
-  // for diagnosis, but the heartbeat evidence is aged — the daemon may no
-  // longer be reachable — so they are NOT offered as ordinary execution
-  // targets. "offline"/"unknown" are likewise excluded. The backend's
-  // command-dispatch validation still accepts the coarse stored status; this UI
-  // rule is the conservative front-door gate, not a replacement for that
-  // separately-reviewable backend hardening.
+  // Only "online" is a safe target. The server resolves "online" from the hot
+  // liveness store (Redis) when available, falling back to a documented DB
+  // last_seen_at window otherwise — so a live daemon no longer flaps to "stale"
+  // merely because its DB heartbeat write is batched. "stale" runtimes are still
+  // shown truthfully in Runtime Health for diagnosis, but their liveness
+  // evidence is aged — the daemon may no longer be reachable — so they are NOT
+  // offered as execution targets. "offline"/"unknown" are likewise excluded.
+  // The backend command-dispatch gate now enforces the same liveness truth
+  // (RequireCommandDeckRuntime), so this UI rule and the API agree: a stale
+  // runtime is rejected at both the front door and the API.
   const targetableRuntimes = runtimes.filter(
     (rt) => runtimeHealth(rt) === "online",
   );
@@ -484,15 +486,26 @@ export default function CommandDeckPage() {
                       Workspace: {preview.workspace_name}
                     </p>
                   </div>
-                  <div className="shrink-0 text-sm">
-                    <span className={previewHealthColor(preview.health_status)}>
-                      {previewHealthLabel(preview.health_status)}
-                    </span>
-                    {preview.health_status_code != null && (
-                      <span className="ml-2 text-muted-foreground">
-                        HTTP {preview.health_status_code}
+                  {/* Reachability and lifecycle are independent axes: this
+                      badge reports whether the preview URL answered its last
+                      HTTP check, NOT whether the registry record is fresh. The
+                      "Lifecycle" field below carries report freshness/retirement.
+                      Captioning the badge keeps a "Healthy" reachability next to
+                      a "Stale" lifecycle from reading as a contradiction. */}
+                  <div className="shrink-0 text-right text-sm">
+                    <div className="text-xs uppercase text-muted-foreground">
+                      Reachability
+                    </div>
+                    <div>
+                      <span className={previewHealthColor(preview.health_status)}>
+                        {previewHealthLabel(preview.health_status)}
                       </span>
-                    )}
+                      {preview.health_status_code != null && (
+                        <span className="ml-2 text-muted-foreground">
+                          HTTP {preview.health_status_code}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -540,6 +553,13 @@ export default function CommandDeckPage() {
                     <dt className="text-xs uppercase text-muted-foreground">Lifecycle</dt>
                     <dd className={previewLifecycleColor(previewLifecycleStatus(preview))}>
                       {previewLifecycleLabel(previewLifecycleStatus(preview))}
+                      {previewLifecycleStatus(preview) === "stale" &&
+                        preview.health_status === "healthy" && (
+                          <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                            Reachable now — only the last status check is over 5
+                            minutes old. Refresh to update.
+                          </span>
+                        )}
                     </dd>
                   </div>
                   <div>

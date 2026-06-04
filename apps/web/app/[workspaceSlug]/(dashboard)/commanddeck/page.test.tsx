@@ -437,6 +437,51 @@ describe("CommandDeckPage Preview Registry", () => {
     expect(screen.getByText("Last Successful Check")).toBeInTheDocument();
   });
 
+  it("distinguishes reachability from report freshness for a reachable-but-stale preview", async () => {
+    // A preview can be HTTP-reachable now ("Healthy") while its registry record
+    // is stale ("Lifecycle: Stale"). Those are independent axes; the UI must not
+    // present them as a contradiction. This pins the captioned reachability badge
+    // and the explanatory freshness note.
+    apiMock.listPreviewRegistry.mockResolvedValueOnce({
+      previews: [
+        {
+          id: "reachable-but-stale",
+          workspace_id: "workspace-1",
+          workspace_name: "Acme",
+          workspace_slug: "acme",
+          runtime_id: null,
+          runtime_name: null,
+          runtime_status: null,
+          machine_identity: null,
+          preview_url: "http://localhost:4100",
+          port: 4100,
+          health_status: "healthy",
+          health_status_code: 200,
+          lifecycle_status: "stale",
+          last_checked_at: "2026-05-29T00:00:00Z",
+          last_success_at: "2026-05-29T00:00:00Z",
+          registered_at: "2026-05-28T00:00:00Z",
+          updated_at: "2026-05-29T00:00:00Z",
+          source: "self_hosted_stack",
+        },
+      ],
+      last_checked_at: "2026-05-29T00:00:00Z",
+    });
+
+    render(<CommandDeckPage />, { wrapper: createWrapper() });
+
+    expect(await screen.findByText("http://localhost:4100")).toBeInTheDocument();
+    // Reachability axis is explicitly captioned and still reads "Healthy".
+    expect(screen.getByText("Reachability")).toBeInTheDocument();
+    expect(screen.getByText("Healthy")).toBeInTheDocument();
+    // Lifecycle axis reads "Stale" with a clarifying reachable-but-stale note.
+    expect(screen.getByText("Lifecycle")).toBeInTheDocument();
+    expect(screen.getByText("Stale")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Reachable now/i),
+    ).toBeInTheDocument();
+  });
+
   it("renders verified runtime provenance and offline runtime truth", async () => {
     apiMock.listRuntimes.mockResolvedValueOnce([
       {
