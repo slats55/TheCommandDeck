@@ -205,11 +205,13 @@ describe("CommandDeckPage Preview Registry", () => {
     expect(screen.getByText("Last seen unknown")).toBeInTheDocument();
   });
 
-  it("labels command target runtimes with truthful heartbeat health, not the coarse online flag", async () => {
+  it("offers only freshly online runtimes as command targets, never stale or offline ones", async () => {
     // A runtime can carry status "online" while its heartbeat has gone stale.
-    // The Runtime Health panel shows that truthfully ("Stale"); the command
-    // target picker must agree instead of advertising the same runtime as
-    // "(online)". Offline runtimes are not reachable and must not be offered.
+    // The Runtime Health panel shows that truthfully ("Stale"), but stale
+    // heartbeat evidence is aged — the daemon may no longer be reachable — so
+    // the command target picker must NOT offer it as an ordinary execution
+    // target. Only a freshly online runtime is a safe target. Offline runtimes
+    // are likewise never offered.
     apiMock.listRuntimes.mockResolvedValue([
       {
         id: "rt-online",
@@ -242,16 +244,16 @@ describe("CommandDeckPage Preview Registry", () => {
 
     render(<CommandDeckPage />, { wrapper: createWrapper() });
 
-    // The stale runtime is selectable but labeled with its true health.
+    // Only the freshly online runtime is offered as an executable target.
     expect(
-      await screen.findByRole("option", { name: "Stale Runtime (Stale)" }),
+      await screen.findByRole("option", { name: "Online Runtime (Online)" }),
     ).toBeInTheDocument();
+    // The stale runtime stays visible in Runtime Health for diagnosis...
+    expect(screen.getByText("Stale Runtime")).toBeInTheDocument();
+    expect(screen.getByText("Stale")).toBeInTheDocument();
+    // ...but it is NOT offered as a command execution target.
     expect(
-      screen.getByRole("option", { name: "Online Runtime (Online)" }),
-    ).toBeInTheDocument();
-    // No target is ever mislabeled with the coarse lowercase "(online)" flag.
-    expect(
-      screen.queryByRole("option", { name: /\(online\)/ }),
+      screen.queryByRole("option", { name: /Stale Runtime/ }),
     ).not.toBeInTheDocument();
     // Offline runtimes are unreachable and never offered as a target.
     expect(
@@ -259,8 +261,21 @@ describe("CommandDeckPage Preview Registry", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("keeps execution disabled when no runtime is online", async () => {
+  it("exposes a no-fresh-runtime state when every runtime is stale or offline", async () => {
+    // Both runtimes still report a coarse stored status of "online", but their
+    // heartbeats have lapsed (health "stale") or the runtime is offline. Neither
+    // is a safe target, so the runner must surface an accurate no-fresh-runtime
+    // state rather than advertising a stale runtime as selectable.
     apiMock.listRuntimes.mockResolvedValue([
+      {
+        id: "rt-stale-only",
+        name: "Stale Runtime",
+        provider: "claude",
+        runtime_mode: "local",
+        status: "online",
+        health_status: "stale",
+        last_seen_at: "2026-05-29T00:00:00Z",
+      },
       {
         id: "rt-offline-only",
         name: "Offline Runtime",
@@ -274,7 +289,49 @@ describe("CommandDeckPage Preview Registry", () => {
 
     render(<CommandDeckPage />, { wrapper: createWrapper() });
 
-    expect(await screen.findByText("No online runtimes available. Connect a daemon to execute commands.")).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "No freshly online runtimes available. Check daemon heartbeat status before running commands.",
+      ),
+    ).toBeInTheDocument();
+    // The stale runtime is still surfaced truthfully in Runtime Health.
+    expect(screen.getByText("Stale Runtime")).toBeInTheDocument();
+    // No execution target is offered.
+    expect(screen.queryByRole("option", { name: /Runtime/ })).not.toBeInTheDocument();
+  });
+
+  it("falls back to coarse status only when health_status is absent (older backend)", async () => {
+    // Backward-compatibility path: an older backend response omits the derived
+    // health_status. The picker must not break — it falls back to the coarse
+    // stored status so a stored "online" remains selectable. This is NOT proof
+    // of heartbeat freshness, just payload compatibility.
+    apiMock.listRuntimes.mockResolvedValue([
+      {
+        id: "rt-legacy-online",
+        name: "Legacy Online Runtime",
+        provider: "codex",
+        runtime_mode: "local",
+        status: "online",
+        last_seen_at: "2026-05-29T00:00:00Z",
+      },
+      {
+        id: "rt-legacy-offline",
+        name: "Legacy Offline Runtime",
+        provider: "claude",
+        runtime_mode: "local",
+        status: "offline",
+        last_seen_at: "2026-05-29T00:00:00Z",
+      },
+    ]);
+
+    render(<CommandDeckPage />, { wrapper: createWrapper() });
+
+    expect(
+      await screen.findByRole("option", { name: "Legacy Online Runtime (Online)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: /Legacy Offline Runtime/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("applies live command_run:updated events to run history without polling", async () => {
