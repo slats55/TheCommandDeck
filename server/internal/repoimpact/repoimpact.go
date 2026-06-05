@@ -266,6 +266,9 @@ func RiskFlags(files []ChangedFile) []RiskFlag {
 	var flags []RiskFlag
 	for _, spec := range riskFlagOrder {
 		if e, ok := ev[spec.name]; ok && len(e) > 0 {
+			// Sort evidence so output is byte-stable regardless of the order
+			// git emitted the changed files — the gate consumes this verbatim.
+			sort.Strings(e)
 			flags = append(flags, RiskFlag{Name: spec.name, Severity: spec.severity, Evidence: e})
 		}
 	}

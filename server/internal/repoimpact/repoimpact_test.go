@@ -165,6 +165,34 @@ func TestRiskFlags_LargeDiff(t *testing.T) {
 	}
 }
 
+func TestRiskFlags_EvidenceSortedAndStable(t *testing.T) {
+	// The classifier feeds a determinism-sensitive verification gate, so a
+	// flag's evidence must be byte-stable regardless of the order git happens
+	// to emit changed files. Same set, two input orders -> identical evidence.
+	forward := []ChangedFile{
+		{Path: "Makefile", Content: "docker compose -f docker-compose.yml"},
+		{Path: "scripts/ensure-postgres.sh", Content: "docker compose"},
+		{Path: "CONTRIBUTING.md", Content: "docker compose"},
+	}
+	reversed := []ChangedFile{forward[2], forward[1], forward[0]}
+
+	evF := flagNames(RiskFlags(forward))["docker_compose_touched"].Evidence
+	evR := flagNames(RiskFlags(reversed))["docker_compose_touched"].Evidence
+
+	want := []string{"CONTRIBUTING.md", "Makefile", "scripts/ensure-postgres.sh"}
+	for _, got := range [][]string{evF, evR} {
+		if len(got) != len(want) {
+			t.Fatalf("evidence = %v, want %v", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("evidence not sorted/stable: got %v, want %v", got, want)
+				break
+			}
+		}
+	}
+}
+
 func TestBuildReport_Shape(t *testing.T) {
 	files := []ChangedFile{
 		{Path: "server/internal/middleware/auth.go"},
