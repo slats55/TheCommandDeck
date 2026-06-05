@@ -229,18 +229,32 @@ touched surface.
 ## Git State
 
 - Branch: `claude/commanddeck-ultra-stability-gate-foundation-002`
-- HEAD: `3c16e68c`
+- HEAD: `283e088a`
 - Commits created (oldest first):
   - `a709bbc0` fix(dev): pin local postgres compose commands to docker-compose.yml
   - `d73dc9bb` fix(auth): log expected unauthenticated 401s at debug/warn, not error
   - `b7715d0a` feat(dev): deterministic local doctor with safe --fix and --json
   - `21d8d5df` feat(dev): add repo impact classifier
   - `3c16e68c` fix(dev): anchor generated-code detection to the file header
-  - _(+ this report, committed as the final docs step)_
-- Files changed vs `origin/main`: 12 code/doc files + this report.
+  - `0f1dd9ea` docs(commanddeck): add sprint 002 stability + gate-foundation handoff
+  - `283e088a` fix(dev): stabilize repo-impact evidence ordering _(added during independent verification — see PR7 note below)_
+- Files changed vs `origin/main`: 13 files (code, docs, this report).
 - Untracked: none (besides the gitignored `.env.worktree` generated for testing).
 - Staged: none after each commit.
-- Pushed: **no** — branch is local. Push only on explicit authorization.
+- Pushed: **yes** — opened as [PR #7](https://github.com/slats55/TheCommandDeck/pull/7) (base `main`). GitHub CI: backend + frontend **passing**; mergeable / mergeState CLEAN.
+
+### PR #7 independent verification (COMMANDDECK-PR7-INDEPENDENT-VERIFY-AND-MERGE-READINESS-001)
+
+An independent gatekeeper pass re-ran the verification matrix against the pushed
+branch and confirmed GitHub CI green. It found one real determinism defect: the
+repo-impact classifier sorted `changedFiles`, subsystem lists, and summary names
+but **not** `RiskFlag.Evidence`, which was appended in `git diff` input order —
+non-deterministic for a tool meant to feed a verification gate. Fixed in commit
+`283e088a` (sort evidence at assembly) with a regression test that classifies
+the same set in two input orders and asserts identical, sorted evidence; the
+`--json` document is now byte-identical across runs. No other blockers; auth was
+not weakened, no secrets are printed, and production/self-host Compose paths were
+untouched. Recommendation: **GO — ready to merge.**
 
 ## Recommended Next Task
 
