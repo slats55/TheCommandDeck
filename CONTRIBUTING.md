@@ -554,7 +554,7 @@ Look for:
 ### List All Local Databases in Shared PostgreSQL
 
 ```bash
-docker compose exec -T postgres psql -U multica -d postgres -At -c "select datname from pg_database order by datname;"
+docker compose -f docker-compose.yml exec -T postgres psql -U multica -d postgres -At -c "select datname from pg_database order by datname;"
 ```
 
 ### Worktree Is Accidentally Using the Main Database
@@ -611,7 +611,7 @@ make start
 If you want to wipe all local PostgreSQL data for this repo:
 
 ```bash
-docker compose down -v
+docker compose -f docker-compose.yml down -v
 ```
 
 Warning:

@@ -302,7 +302,13 @@ export class ApiClient {
     if (!res.ok) {
       if (res.status === 401) this.handleUnauthorized();
       const { message, body } = await this.parseErrorBody(res, `API error: ${res.status} ${res.statusText}`);
-      const logLevel = res.status === 404 ? "warn" : "error";
+      // 401 (unauthenticated) and 404 (not found) are expected client-state
+      // conditions, not server faults. The pre-login session probe hits
+      // /api/me and /api/workspaces unauthenticated on every cold load, so
+      // logging those at error level spams the console with red noise that
+      // looks like a bug. Log them at warn — still visible, not alarming —
+      // and keep error for genuine failures (5xx, 400/403/409, network).
+      const logLevel = res.status === 401 || res.status === 404 ? "warn" : "error";
       this.logger[logLevel](`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
       throw new ApiError(message, res.status, res.statusText, body);
     }

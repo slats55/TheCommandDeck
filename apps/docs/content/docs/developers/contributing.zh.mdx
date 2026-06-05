@@ -157,7 +157,7 @@ Look for `POSTGRES_DB`, `DATABASE_URL`, `PORT`, `FRONTEND_PORT`.
 ### List All Local Databases
 
 ```bash
-docker compose exec -T postgres psql -U multica -d postgres \
+docker compose -f docker-compose.yml exec -T postgres psql -U multica -d postgres \
   -At -c "select datname from pg_database order by datname;"
 ```
 
@@ -182,7 +182,7 @@ make start
 Wipe all local PostgreSQL data:
 
 ```bash
-docker compose down -v
+docker compose -f docker-compose.yml down -v
 ```
 
 > **Warning:** This deletes the shared Docker volume and all databases. After that you must run `make setup-main` or `make setup-worktree` again.

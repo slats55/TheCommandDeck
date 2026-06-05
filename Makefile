@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop
+.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop repo-impact
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -26,7 +26,13 @@ export
 
 MULTICA_ARGS ?= $(ARGS)
 
-COMPOSE := docker compose
+# COMPOSE drives only the local-dev DB targets (db-up / db-down / db-reset),
+# which operate on the shared `postgres` service. That service is defined only
+# in docker-compose.yml; a bare `docker compose` auto-selects compose.yml (the
+# production "commanddeck" stack, which has no `postgres` service) and fails
+# with "no such service: postgres". Pin the file explicitly. Self-host targets
+# above use their own `-f docker-compose.selfhost.yml` and never touch this var.
+COMPOSE := docker compose -f docker-compose.yml
 
 define REQUIRE_ENV
 	@if [ ! -f "$(ENV_FILE)" ]; then \
@@ -271,6 +277,9 @@ cli: ## Run the multica CLI with ARGS or MULTICA_ARGS from source
 
 multica: ## Run the multica CLI entrypoint directly from the Go source tree
 	cd server && go run ./cmd/multica $(MULTICA_ARGS)
+
+repo-impact: ## Classify what this branch changed vs origin/main (subsystems + risk flags). ARGS="--json" for machine output
+	cd server && go run ./cmd/repo-impact $(ARGS)
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
