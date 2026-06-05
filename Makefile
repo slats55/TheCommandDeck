@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop
+.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop repo-impact
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -277,6 +277,9 @@ cli: ## Run the multica CLI with ARGS or MULTICA_ARGS from source
 
 multica: ## Run the multica CLI entrypoint directly from the Go source tree
 	cd server && go run ./cmd/multica $(MULTICA_ARGS)
+
+repo-impact: ## Classify what this branch changed vs origin/main (subsystems + risk flags). ARGS="--json" for machine output
+	cd server && go run ./cmd/repo-impact $(ARGS)
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
