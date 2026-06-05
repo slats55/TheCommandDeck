@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Pin the local-dev DB stack to docker-compose.yml regardless of CWD.
+# The repo ships both compose.yml (production "commanddeck" stack) and
+# docker-compose.yml (local-dev "multica" stack). A bare `docker compose`
+# auto-selects compose.yml, which has no `postgres` service — so any bare
+# `docker compose ... postgres` fails with "no such service: postgres".
+# Resolving the file script-relative keeps this correct from any directory.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+COMPOSE=(docker compose -f "$REPO_ROOT/docker-compose.yml")
+
 ENV_FILE="${1:-.env}"
 
 if [ ! -f "$ENV_FILE" ]; then
@@ -69,19 +79,19 @@ is_local() {
 if is_local; then
   # ---------- Local: use Docker ----------
   echo "==> Ensuring shared PostgreSQL container is running on localhost:5432..."
-  docker compose up -d postgres
+  "${COMPOSE[@]}" up -d postgres
 
   echo "==> Waiting for PostgreSQL to be ready..."
-  until docker compose exec -T postgres pg_isready -U "$POSTGRES_USER" -d postgres > /dev/null 2>&1; do
+  until "${COMPOSE[@]}" exec -T postgres pg_isready -U "$POSTGRES_USER" -d postgres > /dev/null 2>&1; do
     sleep 1
   done
 
   echo "==> Ensuring database '$POSTGRES_DB' exists..."
-  db_exists="$(docker compose exec -T postgres \
+  db_exists="$("${COMPOSE[@]}" exec -T postgres \
     psql -U "$POSTGRES_USER" -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname = '$POSTGRES_DB'")"
 
   if [ "$db_exists" != "1" ]; then
-    docker compose exec -T postgres \
+    "${COMPOSE[@]}" exec -T postgres \
       psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 \
       -c "CREATE DATABASE \"$POSTGRES_DB\"" \
       > /dev/null

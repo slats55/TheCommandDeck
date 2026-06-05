@@ -26,7 +26,13 @@ export
 
 MULTICA_ARGS ?= $(ARGS)
 
-COMPOSE := docker compose
+# COMPOSE drives only the local-dev DB targets (db-up / db-down / db-reset),
+# which operate on the shared `postgres` service. That service is defined only
+# in docker-compose.yml; a bare `docker compose` auto-selects compose.yml (the
+# production "commanddeck" stack, which has no `postgres` service) and fails
+# with "no such service: postgres". Pin the file explicitly. Self-host targets
+# above use their own `-f docker-compose.selfhost.yml` and never touch this var.
+COMPOSE := docker compose -f docker-compose.yml
 
 define REQUIRE_ENV
 	@if [ ! -f "$(ENV_FILE)" ]; then \
